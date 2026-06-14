@@ -249,18 +249,22 @@ export default function App() {
 
       if (url && key) {
         try {
-          // Fetch products
-          const opRes = await fetch(`${url}/rest/v1/online_products?t=${Date.now()}`, {
-            headers: { 'apikey': key, 'Authorization': `Bearer ${key}` },
-            cache: 'no-store'
-          });
-          if (opRes.ok) {
-            const opData = await opRes.json();
-            if (opData && opData.length > 0) {
-              const siteConfigRow = opData.find((p: any) => p.id === '__SITE_CONFIG__');
-              const normalProducts = opData.filter((p: any) => p.id !== '__SITE_CONFIG__');
+          const [digRes, affRes, giftRes] = await Promise.all([
+            fetch(`${url}/rest/v1/digital_products?t=${Date.now()}`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' }),
+            fetch(`${url}/rest/v1/affiliate_products?t=${Date.now()}`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' }),
+            fetch(`${url}/rest/v1/gifts?t=${Date.now()}`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' })
+          ]);
+
+          let fetchedSiteConfigStr = null;
+
+          if (digRes.ok) {
+            const digData = await digRes.json();
+            if (digData && digData.length > 0) {
+              const siteConfigRow = digData.find((p: any) => p.id === '__SITE_CONFIG__');
+              const normalDigital = digData.filter((p: any) => p.id !== '__SITE_CONFIG__');
+              fetchedSiteConfigStr = siteConfigRow ? (siteConfigRow.htmlContent || siteConfigRow.htmlcontent) : null;
               
-              const normalizedProducts = normalProducts.map((p: any) => ({
+              const normalizedDigital = normalDigital.map((p: any) => ({
                  ...p,
                  htmlContent: p.htmlContent || p.htmlcontent,
                  downloadUrl: p.downloadUrl || p.downloadurl,
@@ -271,55 +275,81 @@ export default function App() {
                  isPubliclyClaimable: p.isPubliclyClaimable !== undefined ? p.isPubliclyClaimable : p.ispubliclyclaimable,
                  allowedBuyerIds: p.allowedBuyerIds || p.allowedbuyerids
               }));
+              if (normalizedDigital.length > 0) setOnlineProducts(normalizedDigital);
+            }
+          }
 
-              if (normalizedProducts.length > 0) setOnlineProducts(normalizedProducts);
-              
-              const scHtmlContent = siteConfigRow ? (siteConfigRow.htmlContent || siteConfigRow.htmlcontent) : null;
-              if (scHtmlContent) {
-                try {
-                  const sc = JSON.parse(scHtmlContent);
-                  if (sc.products && sc.products.length > 0 && (!expressDbData.affili_products || sc.products.length >= expressDbData.affili_products.length)) {
-                    setProducts(sc.products);
-                    localStorage.setItem('affili_products', JSON.stringify(sc.products));
-                  }
-                  if (sc.giftMaterials && sc.giftMaterials.length > 0 && (!expressDbData.affili_gift_materials || sc.giftMaterials.length >= expressDbData.affili_gift_materials.length)) {
-                     const isAdm = localStorage.getItem('isAdminLoggedIn') === 'true';
-                     if (!isAdm || !localStorage.getItem('affili_gift_materials') || sc.giftMaterials.length >= JSON.parse(localStorage.getItem('affili_gift_materials') || '[]').length) {
-                       setGiftMaterials(sc.giftMaterials);
-                       localStorage.setItem('affili_gift_materials', JSON.stringify(sc.giftMaterials));
-                     }
-                  }
-                  if (sc.categories && sc.categories.length > 0 && (!expressDbData.affili_categories || sc.categories.length >= expressDbData.affili_categories.length)) {
-                    setCategories(sc.categories);
-                    localStorage.setItem('affili_categories', JSON.stringify(sc.categories));
-                  }
-                  if (sc.giftCampaigns && sc.giftCampaigns.length > 0 && (!expressDbData.affili_gift_campaigns || sc.giftCampaigns.length >= expressDbData.affili_gift_campaigns.length)) {
-                    setGiftCampaigns(sc.giftCampaigns);
-                    localStorage.setItem('affili_gift_campaigns', JSON.stringify(sc.giftCampaigns));
-                  }
-                  if (sc.giftClaimLink && expressDbData.affili_gift_claim_link === undefined) setGiftClaimLink(sc.giftClaimLink);
-                  if (sc.guaranteedWinSpins !== undefined && expressDbData.affili_guaranteed_win_spins === undefined) setGuaranteedWinSpins(Number(sc.guaranteedWinSpins));
-                  if (sc.socials && !expressDbData.affili_social_channels) setSocials(sc.socials);
-                  if (sc.adminFacebook) localStorage.setItem('admin_facebook', sc.adminFacebook);
-                  if (sc.adminZalo) localStorage.setItem('admin_zalo', sc.adminZalo);
-                  if (sc.adminTiktok) localStorage.setItem('admin_tiktok', sc.adminTiktok);
-                  
-                  if (sc.geminiKeys && sc.geminiKeys.length > 0) {
-                     try {
-                        const loadedKeys = sc.geminiKeys.map((k: any) => {
-                           if (k.key && typeof k.key === 'string' && !k.key.startsWith('AIzaSy')) {
-                              try { return { ...k, key: atob(k.key) }; } catch(e) { return k; }
-                           }
-                           return k;
-                        });
-                        setGeminiKeys(loadedKeys);
-                     } catch(e) {}
-                  }
-                  window.dispatchEvent(new Event('storage'));
-                } catch(e) {
-                  console.error("Failed to parse site config from cloud", e);
-                }
+          if (affRes.ok) {
+             const affData = await affRes.json();
+             if (affData && affData.length > 0) {
+                 const normalizedAff = affData.map((p: any) => ({
+                     ...p,
+                     originalPrice: p.originalPrice || p.originalprice,
+                     discountPercent: p.discountPercent || p.discountpercent,
+                     videoUrl: p.videoUrl || p.videourl,
+                     categoryId: p.categoryId || p.categoryid,
+                     affiliateLink: p.affiliateLink || p.affiliatelink,
+                     soldCount: p.soldCount || p.soldcount,
+                     isSuggested: p.isSuggested !== undefined ? p.isSuggested : p.issuggested,
+                     isDirectProduct: p.isDirectProduct !== undefined ? p.isDirectProduct : p.isdirectproduct,
+                     postDate: p.postDate || p.postdate
+                 }));
+                 if (!expressDbData.affili_products || normalizedAff.length >= expressDbData.affili_products.length) {
+                    setProducts(normalizedAff);
+                    localStorage.setItem('affili_products', JSON.stringify(normalizedAff));
+                 }
+             }
+          }
+
+          if (giftRes.ok) {
+             const giftData = await giftRes.json();
+             if (giftData && giftData.length > 0) {
+                 const normalizedGifts = giftData.map((g: any) => ({
+                     ...g,
+                     htmlContent: g.htmlContent || g.htmlcontent,
+                     isPubliclyClaimable: g.isPubliclyClaimable !== undefined ? g.isPubliclyClaimable : g.ispubliclyclaimable
+                 }));
+                 const isAdm = localStorage.getItem('isAdminLoggedIn') === 'true';
+                 if (!isAdm || !localStorage.getItem('affili_gift_materials') || normalizedGifts.length >= JSON.parse(localStorage.getItem('affili_gift_materials') || '[]').length) {
+                    setGiftMaterials(normalizedGifts);
+                    localStorage.setItem('affili_gift_materials', JSON.stringify(normalizedGifts));
+                 }
+             }
+          }
+
+          if (fetchedSiteConfigStr) {
+            try {
+              const sc = JSON.parse(fetchedSiteConfigStr);
+              if (sc.categories && sc.categories.length > 0 && (!expressDbData.affili_categories || sc.categories.length >= expressDbData.affili_categories.length)) {
+                 setCategories(sc.categories);
+                 localStorage.setItem('affili_categories', JSON.stringify(sc.categories));
               }
+              if (sc.giftCampaigns && sc.giftCampaigns.length > 0 && (!expressDbData.affili_gift_campaigns || sc.giftCampaigns.length >= expressDbData.affili_gift_campaigns.length)) {
+                 setGiftCampaigns(sc.giftCampaigns);
+                 localStorage.setItem('affili_gift_campaigns', JSON.stringify(sc.giftCampaigns));
+              }
+              if (sc.giftClaimLink && expressDbData.affili_gift_claim_link === undefined) setGiftClaimLink(sc.giftClaimLink);
+              if (sc.guaranteedWinSpins !== undefined && expressDbData.affili_guaranteed_win_spins === undefined) setGuaranteedWinSpins(Number(sc.guaranteedWinSpins));
+              if (sc.socials && !expressDbData.affili_social_channels) setSocials(sc.socials);
+              
+              if (sc.adminFacebook) localStorage.setItem('admin_facebook', sc.adminFacebook);
+              if (sc.adminZalo) localStorage.setItem('admin_zalo', sc.adminZalo);
+              if (sc.adminTiktok) localStorage.setItem('admin_tiktok', sc.adminTiktok);
+              
+              if (sc.geminiKeys && sc.geminiKeys.length > 0) {
+                 try {
+                    const loadedKeys = sc.geminiKeys.map((k: any) => {
+                       if (k.key && typeof k.key === 'string' && !k.key.startsWith('AIzaSy')) {
+                          try { return { ...k, key: atob(k.key) }; } catch(e) { return k; }
+                       }
+                       return k;
+                    });
+                    setGeminiKeys(loadedKeys);
+                 } catch(e) {}
+              }
+              window.dispatchEvent(new Event('storage'));
+            } catch(e) {
+              console.error("Failed to parse site config from cloud", e);
             }
           }
           // Fetch buyers

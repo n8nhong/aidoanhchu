@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import { Product, Category, VisitorStats, Buyer, SearchQueryTrack } from '../types';
 import { MOCK_STATS } from '../mockData';
 import { formatCurrency, setItemResilient, compressImage } from '../utils';
@@ -175,6 +176,44 @@ export function AdminDashboard({
   // Database Supabase States
   const [dbSupabaseUrl, setDbSupabaseUrl] = useState(() => localStorage.getItem('supabase_url') || 'https://encpsaatojnxgyjjcvnx.supabase.co');
   const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('supabase_key') || '');
+
+  const uploadImageToSupabase = async (file: File): Promise<string | null> => {
+    let url = (dbSupabaseUrl.trim() || localStorage.getItem('supabase_url') || '') as string;
+    const key = (dbSupabaseKey.trim() || localStorage.getItem('supabase_key')) as string;
+    if (!url || !key) {
+      alert("Vui lòng cấu hình Supabase URL và Key ở tab Hệ Thống trước khi upload ảnh.");
+      return null;
+    }
+    if (!url.startsWith('http') && !url.includes('.')) url = `https://${url}.supabase.co`;
+    const cleanUrl = url.endsWith('/') ? url.slice(0, -1) : url;
+
+    try {
+      const supabase = createClient(cleanUrl, key);
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      const { data, error } = await supabase.storage
+        .from('product-images')
+        .upload(filePath, file, { cacheControl: '3600', upsert: false });
+
+      if (error) {
+        console.error("Lỗi upload Supabase:", error);
+        alert("Lỗi upload ảnh lên Cloud: " + error.message);
+        return null;
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from('product-images')
+        .getPublicUrl(filePath);
+
+      return publicUrlData.publicUrl;
+    } catch (e: any) {
+      console.error(e);
+      alert("Lỗi kết nối upload: " + e.message);
+      return null;
+    }
+  };
   
   const fetchLicenses = async () => {
     try {
@@ -1727,7 +1766,19 @@ export function AdminDashboard({
     }, 800);
   };
 
-  const handleCreateProduct = (e: React.FormEvent) => {
+  const base64ToFile = (base64: string, filename: string): File => {
+    const arr = base64.split(',');
+    const mime = arr[0].match(/:(.*?);/)![1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, { type: mime });
+  };
+
+  const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) {
       setErrorMsg('Vui lòng nhập "Tên sản phẩm". Đây là trường thông tin bắt buộc.');
@@ -1754,6 +1805,20 @@ export function AdminDashboard({
       return;
     }
 
+    let finalImageUrl = image;
+    if (image.startsWith('data:image/')) {
+      setSuccessMsg('⏳ Đang tải ảnh lên máy chủ (Cloud)...');
+      const file = base64ToFile(image, 'upload.jpg');
+      const uploadedUrl = await uploadImageToSupabase(file);
+      if (uploadedUrl) {
+        finalImageUrl = uploadedUrl;
+        setImage(uploadedUrl);
+      } else {
+        setErrorMsg('Lỗi khi tải ảnh. Vui lòng kiểm tra lại cấu hình Supabase.');
+        return;
+      }
+    }
+
     const calculatedDiscount = finalOriginalPrice > finalPrice 
       ? Math.round(((finalOriginalPrice - finalPrice) / finalOriginalPrice) * 100) 
       : 0;
@@ -1766,7 +1831,7 @@ export function AdminDashboard({
         price: finalPrice,
         originalPrice: finalOriginalPrice,
         discountPercent: calculatedDiscount,
-        image,
+        image: finalImageUrl,
         categoryId,
         affiliateLink,
         platform,
@@ -1788,7 +1853,7 @@ export function AdminDashboard({
         price: finalPrice,
         originalPrice: finalOriginalPrice,
         discountPercent: calculatedDiscount,
-        image,
+        image: finalImageUrl,
         categoryId,
         affiliateLink,
         platform,
@@ -5062,8 +5127,6 @@ export function AdminDashboard({
                     try {
                       const cleanUrl = url.endsWith('/') ? url.slice(0, -1) : url;
                       const siteConfig = {
-                         products,
-                         giftMaterials,
                          categories,
                          giftCampaigns,
                          giftClaimLink: giftClaimLink || '',
@@ -5074,28 +5137,25 @@ export function AdminDashboard({
                          adminTiktok,
                          geminiKeys: (geminiKeys || []).filter(k => k.status === 'valid').map(k => ({...k, key: btoa(k.key)}))
                       };
-                      const fullItems = [
-                        {
-                          id: '__SITE_CONFIG__',
-                          title: 'System Configuration',
-                          type: 'system',
-                          price: 0,
-                          originalPrice: 0,
-                          isFree: true,
-                          htmlContent: JSON.stringify(siteConfig),
-                          isShowOnHome: false,
-                          isSystemGenerated: true
-                        },
-                        ...onlineProducts
-                      ];
+                      
+                      const siteConfigItem = {
+                        id: '__SITE_CONFIG__',
+                        title: 'System Configuration',
+                        price: 0,
+                        originalPrice: 0,
+                        isFree: true,
+                        htmlContent: JSON.stringify(siteConfig),
+                        isShowOnHome: false,
+                        isSystemGenerated: true
+                      };
                       
                       setSuccessMsg("⏳ Đang đẩy dữ liệu lên Database, vui lòng chờ...");
 
-                      const tryPush = async (payloadItems: any[]) => {
+                      const tryPushToTable = async (tableName: string, payloadItems: any[]) => {
                         const chunkSize = 20;
                         for (let i = 0; i < payloadItems.length; i += chunkSize) {
                           const chunk = payloadItems.slice(i, i + chunkSize);
-                          const res = await fetch(`${cleanUrl}/rest/v1/online_products?on_conflict=id`, {
+                          const res = await fetch(`${cleanUrl}/rest/v1/${tableName}?on_conflict=id`, {
                             method: 'POST',
                             headers: { 
                               'apikey': key, 
@@ -5107,57 +5167,62 @@ export function AdminDashboard({
                           });
                           if (!res.ok) {
                              const errText = await res.text();
-                             throw new Error(errText);
+                             throw new Error(`Error in ${tableName}: ` + errText);
                           }
                         }
                       };
                       
                       try {
-                         const currentIds = fullItems.map(p => p.id);
-                         await fetch(`${cleanUrl}/rest/v1/online_products?id=not.in.(${currentIds.join(',')})`, {
-                           method: 'DELETE',
-                           headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
-                         }).catch(e => console.error("Purge old cloud items failed", e));
-                         
-                         if (fullItems.length > 0) {
-                           try {
-                             await tryPush(fullItems.map(p => ({
+                         // 1. Digital Products + Config
+                         const digitalItems = [siteConfigItem, ...onlineProducts].map(p => ({
                                id: p.id,
                                title: p.title || '',
-                               type: p.type || null,
                                price: p.price || 0,
-                               originalPrice: p.originalPrice || 0,
-                               isFree: p.isFree !== undefined ? p.isFree : false,
-                               downloadUrl: p.downloadUrl || null,
-                               htmlContent: p.htmlContent || null,
-                               isShowOnHome: p.isShowOnHome !== undefined ? p.isShowOnHome : false,
-                               isSystemGenerated: p.isSystemGenerated !== undefined ? p.isSystemGenerated : false,
-                               isPubliclyClaimable: p.isPubliclyClaimable !== undefined ? p.isPubliclyClaimable : true,
-                               allowedBuyerIds: p.allowedBuyerIds || null
-                             })));
-                           } catch (e: any) {
-                             const msg = e.message || String(e);
-                             if (msg.includes("Could not find the") && msg.includes("column")) {
-                               // Fallback to lowercase schema mapping
-                               await tryPush(fullItems.map(p => ({
-                                 id: p.id,
-                                 title: p.title || '',
-                                 type: p.type || null,
-                                 price: p.price || 0,
-                                 originalprice: p.originalPrice || 0,
-                                 isfree: p.isFree !== undefined ? p.isFree : false,
-                                 downloadurl: p.downloadUrl || null,
-                                 htmlcontent: p.htmlContent || null,
-                                 isshowonhome: p.isShowOnHome !== undefined ? p.isShowOnHome : false,
-                                 issystemgenerated: p.isSystemGenerated !== undefined ? p.isSystemGenerated : false,
-                                 ispubliclyclaimable: p.isPubliclyClaimable !== undefined ? p.isPubliclyClaimable : true,
-                                 allowedbuyerids: p.allowedBuyerIds || null
-                               })));
-                             } else {
-                               throw e;
-                             }
-                           }
-                         }
+                               "originalPrice": p.originalPrice || 0,
+                               "isFree": p.isFree !== undefined ? p.isFree : false,
+                               "downloadUrl": p.downloadUrl || null,
+                               "htmlContent": p.htmlContent || null,
+                               "isShowOnHome": p.isShowOnHome !== undefined ? p.isShowOnHome : false,
+                               "isSystemGenerated": p.isSystemGenerated !== undefined ? p.isSystemGenerated : false,
+                               "isPubliclyClaimable": p.isPubliclyClaimable !== undefined ? p.isPubliclyClaimable : true,
+                               "allowedBuyerIds": p.allowedBuyerIds || null
+                         }));
+                         const digIds = digitalItems.map(p => p.id);
+                         await fetch(`${cleanUrl}/rest/v1/digital_products?id=not.in.(${digIds.join(',')})`, { method: 'DELETE', headers: { 'apikey': key, 'Authorization': `Bearer ${key}` } }).catch(()=>{});
+                         if (digitalItems.length > 0) await tryPushToTable('digital_products', digitalItems);
+
+                         // 2. Affiliate Products
+                         const affItems = products.map(p => ({
+                             id: p.id,
+                             title: p.title || '',
+                             price: p.price || 0,
+                             "originalPrice": p.originalPrice || 0,
+                             "discountPercent": p.discountPercent || 0,
+                             image: p.image || '',
+                             "videoUrl": p.videoUrl || null,
+                             "categoryId": p.categoryId || null,
+                             "affiliateLink": p.affiliateLink || '',
+                             platform: p.platform || 'other',
+                             "soldCount": p.soldCount || 0,
+                             description: p.description || null,
+                             "isSuggested": p.isSuggested !== undefined ? p.isSuggested : false,
+                             "isDirectProduct": p.isDirectProduct !== undefined ? p.isDirectProduct : false,
+                             "postDate": p.postDate || null
+                         }));
+                         const affIds = affItems.length > 0 ? affItems.map(p => p.id) : ['dummy'];
+                         await fetch(`${cleanUrl}/rest/v1/affiliate_products?id=not.in.(${affIds.join(',')})`, { method: 'DELETE', headers: { 'apikey': key, 'Authorization': `Bearer ${key}` } }).catch(()=>{});
+                         if (affItems.length > 0) await tryPushToTable('affiliate_products', affItems);
+
+                         // 3. Gifts
+                         const giftItems = giftMaterials.map((g: any) => ({
+                             id: g.id || 'g_' + Date.now(),
+                             title: g.title || '',
+                             "htmlContent": g.htmlContent || null,
+                             "isPubliclyClaimable": g.isPubliclyClaimable !== undefined ? g.isPubliclyClaimable : true
+                         }));
+                         const giftIds = giftItems.length > 0 ? giftItems.map(p => p.id) : ['dummy'];
+                         await fetch(`${cleanUrl}/rest/v1/gifts?id=not.in.(${giftIds.join(',')})`, { method: 'DELETE', headers: { 'apikey': key, 'Authorization': `Bearer ${key}` } }).catch(()=>{});
+                         if (giftItems.length > 0) await tryPushToTable('gifts', giftItems);
                          setSuccessMsg('');
                          alert("✅ Đã đẩy Toàn Bộ Sản phẩm Affiliate, Quà Tặng và Cấu Hình lên Cloud thành công!\n\nWebsite của khách khi khởi chạy sẽ tự lấy dữ liệu từ Database này. Tất cả khách hàng sẽ thấy cùng một nội dung.");
                       } catch (e: any) {
@@ -5189,10 +5254,9 @@ CREATE TABLE IF NOT EXISTS public.buyers (
   "registeredAt" text
 );
 
-CREATE TABLE IF NOT EXISTS public.online_products (
+CREATE TABLE IF NOT EXISTS public.digital_products (
   id text PRIMARY KEY,
   title text NOT NULL,
-  type text,
   price numeric,
   "originalPrice" numeric,
   "isFree" boolean,
@@ -5204,16 +5268,44 @@ CREATE TABLE IF NOT EXISTS public.online_products (
   "allowedBuyerIds" jsonb
 );
 
+CREATE TABLE IF NOT EXISTS public.gifts (
+  id text PRIMARY KEY,
+  title text NOT NULL,
+  "htmlContent" text,
+  "isPubliclyClaimable" boolean
+);
+
+CREATE TABLE IF NOT EXISTS public.affiliate_products (
+  id text PRIMARY KEY,
+  title text NOT NULL,
+  price numeric,
+  "originalPrice" numeric,
+  "discountPercent" numeric,
+  image text,
+  "videoUrl" text,
+  "categoryId" text,
+  "affiliateLink" text,
+  platform text,
+  "soldCount" numeric,
+  description text,
+  "isSuggested" boolean,
+  "isDirectProduct" boolean,
+  "postDate" text
+);
+
+insert into storage.buckets (id, name, public) values ('product-images', 'product-images', true) on conflict (id) do nothing;
+create policy "Allow public read access on product-images" on storage.objects for select using ( bucket_id = 'product-images' );
+create policy "Allow all uploads on product-images" on storage.objects for insert with check ( bucket_id = 'product-images' );
+
 ALTER TABLE public.buyers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.online_products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.digital_products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.gifts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.affiliate_products ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Enable all access buyers" ON public.buyers;
-DROP POLICY IF EXISTS "Enable all access products" ON public.online_products;
-DROP POLICY IF EXISTS "Allow ALL buyers" ON public.buyers;
-DROP POLICY IF EXISTS "Allow ALL online_products" ON public.online_products;
-
-CREATE POLICY "Allow ALL buyers" ON public.buyers FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow ALL online_products" ON public.online_products FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow ALL" ON public.buyers FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow ALL" ON public.digital_products FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow ALL" ON public.gifts FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow ALL" ON public.affiliate_products FOR ALL USING (true) WITH CHECK (true);
 `;
                   navigator.clipboard.writeText(sql);
                   alert('Đã copy mã SQL!');
@@ -5223,7 +5315,7 @@ CREATE POLICY "Allow ALL online_products" ON public.online_products FOR ALL USIN
                 Copy SQL
               </button>
               <pre className="whitespace-pre-wrap leading-relaxed select-all">
-{`-- Chạy mã này trong Supabase > SQL Editor để tạo bảng:
+{`-- Chạy mã này trong Supabase > SQL Editor để tạo các bảng riêng biệt:
 
 CREATE TABLE IF NOT EXISTS public.buyers (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -5234,10 +5326,9 @@ CREATE TABLE IF NOT EXISTS public.buyers (
   "registeredAt" text
 );
 
-CREATE TABLE IF NOT EXISTS public.online_products (
+CREATE TABLE IF NOT EXISTS public.digital_products (
   id text PRIMARY KEY,
   title text NOT NULL,
-  type text,
   price numeric,
   "originalPrice" numeric,
   "isFree" boolean,
@@ -5249,15 +5340,54 @@ CREATE TABLE IF NOT EXISTS public.online_products (
   "allowedBuyerIds" jsonb
 );
 
--- Bật quyền truy cập công khai (Rất dễ Dùng):
+CREATE TABLE IF NOT EXISTS public.gifts (
+  id text PRIMARY KEY,
+  title text NOT NULL,
+  "htmlContent" text,
+  "isPubliclyClaimable" boolean
+);
+
+CREATE TABLE IF NOT EXISTS public.affiliate_products (
+  id text PRIMARY KEY,
+  title text NOT NULL,
+  price numeric,
+  "originalPrice" numeric,
+  "discountPercent" numeric,
+  image text,
+  "videoUrl" text,
+  "categoryId" text,
+  "affiliateLink" text,
+  platform text,
+  "soldCount" numeric,
+  description text,
+  "isSuggested" boolean,
+  "isDirectProduct" boolean,
+  "postDate" text
+);
+
+-- Tự động tạo Storage Bucket để chứa ảnh
+insert into storage.buckets (id, name, public)
+values ('product-images', 'product-images', true)
+on conflict (id) do nothing;
+
+create policy "Allow public read access on product-images"
+  on storage.objects for select
+  using ( bucket_id = 'product-images' );
+
+create policy "Allow all uploads on product-images"
+  on storage.objects for insert
+  with check ( bucket_id = 'product-images' );
+
+-- Bật RLS và cấp quyền Public (Cho phép tải dễ dàng)
 ALTER TABLE public.buyers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.online_products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.digital_products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.gifts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.affiliate_products ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Allow ALL buyers" ON public.buyers;
-DROP POLICY IF EXISTS "Allow ALL online_products" ON public.online_products;
-
-CREATE POLICY "Allow ALL buyers" ON public.buyers FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow ALL online_products" ON public.online_products FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow ALL" ON public.buyers FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow ALL" ON public.digital_products FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow ALL" ON public.gifts FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow ALL" ON public.affiliate_products FOR ALL USING (true) WITH CHECK (true);
 `}
               </pre>
             </div>
