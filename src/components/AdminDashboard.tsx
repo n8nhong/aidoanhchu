@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { Product, Category, VisitorStats, Buyer, SearchQueryTrack } from '../types';
 import { MOCK_STATS } from '../mockData';
 import { formatCurrency, setItemResilient, compressImage } from '../utils';
+import { getSupabase } from '../utils/supabaseClient';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -174,46 +175,30 @@ export function AdminDashboard({
   const [pwNew, setPwNew] = useState('');
   
   // Database Supabase States
-  const [dbSupabaseUrl, setDbSupabaseUrl] = useState(() => localStorage.getItem('supabase_url') || 'https://encpsaatojnxgyjjcvnx.supabase.co');
-  const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('supabase_key') || '');
+  const [dbSupabaseUrl, setDbSupabaseUrl] = useState(() => localStorage.getItem('supabase_url') || '');
+const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('supabase_key') || '');
 
   const uploadImageToSupabase = async (file: File): Promise<string | null> => {
-    let url = (dbSupabaseUrl.trim() || localStorage.getItem('supabase_url') || '') as string;
-    const key = (dbSupabaseKey.trim() || localStorage.getItem('supabase_key')) as string;
-    if (!url || !key) {
-      alert("Vui lòng cấu hình Supabase URL và Key ở tab Hệ Thống trước khi upload ảnh.");
+    const supabase = getSupabase();
+    if (!supabase) return null;
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
+    const filePath = `${fileName}`;
+
+    const { data, error } = await supabase.storage
+      .from('product-images')
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+
+    if (error) {
+      console.error("Lỗi upload Supabase:", error);
+      alert("Lỗi upload ảnh lên Cloud: " + error.message);
       return null;
     }
-    if (!url.startsWith('http') && !url.includes('.')) url = `https://${url}.supabase.co`;
-    const cleanUrl = url.endsWith('/') ? url.slice(0, -1) : url;
 
-    try {
-      const supabase = createClient(cleanUrl, key);
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
-      const filePath = `${fileName}`;
-
-      const { data, error } = await supabase.storage
-        .from('product-images')
-        .upload(filePath, file, { cacheControl: '3600', upsert: false });
-
-      if (error) {
-        console.error("Lỗi upload Supabase:", error);
-        alert("Lỗi upload ảnh lên Cloud: " + error.message);
-        return null;
-      }
-
-      const { data: publicUrlData } = supabase.storage
-        .from('product-images')
-        .getPublicUrl(filePath);
-
-      return publicUrlData.publicUrl;
-    } catch (e: any) {
-      console.error(e);
-      alert("Lỗi kết nối upload: " + e.message);
-      return null;
-    }
-  };
+    const { publicUrl } = supabase.storage.from('product-images').getPublicUrl(filePath);
+    return publicUrl;
+  };;
   
   const fetchLicenses = async () => {
     try {
@@ -479,7 +464,7 @@ export function AdminDashboard({
     
     // Push API to Supabase Cloud
     const pushCloud = async () => {
-      let url = localStorage.getItem('supabase_url') || 'https://encpsaatojnxgyjjcvnx.supabase.co';
+      let url = localStorage.getItem('supabase_url') || '';
       let key = localStorage.getItem('supabase_key');
       if (!key) {
         try {
