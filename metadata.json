@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Cửa Hàng Tiếp Thị Liên Kết",
+  "description": "Nền tảng trưng bày sản phẩm tiếp thị liên kết chuyên nghiệp mang phong cách sàn thương mại điện tử.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

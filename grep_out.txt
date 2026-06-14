@@ -1,0 +1,39 @@
+ction Xt(j){var K={"=":"=0",":":"=2"};return"$"+j.replace(/[=:]/g,function(it){return K[it]})}var Te=/\/+/g
+=""?"."+me(j,0):ut,mt(Ot)?(it="",St!=null&&(it=St.replace(Te,"$&/")+"/"),V(Ot,K,it,"",function(li){return l
+t+(Ot.key==null||j&&j.key===Ot.key?"":(""+Ot.key).replace(Te,"$&/")+"/")+St)),K.push(Ot)),1;St=0;var Pt=ut=
+`+w[a].replace(" at new "," at ");return t.displayName&&U.includ
+es("<anonymous>")&&(U=U.replace("<anonymous>",t.displayName)),U}while(1<=a&&0<=c)
+n t.body}}var Z=/[\n"\\]/g;function W(t){return t.replace(Z,function(e){return"\\"+e.charCodeAt(0).toString
+;function Uf(t){return(typeof t=="string"?t:""+t).replace(Iy,`
+`).replace(Zy,"")}function Gf(t,e){return e=Uf(e),Uf(t)===e}
+ate:h.getState(),info:"react-transition",history:"replace"})}}if(typeof navigation=="object"){var a=!1,c=nu
+{const x=[...f].sort((N,k)=>{const M=String(N.id).replace("op_gen_","").replace("gen_",""),E=String(k.id).r
+eplace("op_gen_","").replace("gen_","");return Number(E)-Number(M)}),y=new Set
+{const x=[...f].sort((N,k)=>{const M=String(N.id).replace("gen_",""),E=String(k.id).replace("gen_","");retu
+ */const Ov=i=>i.replace(/([a-z0-9])([A-Z])/g,"$1-$2").toLowerCase(),zv=i=
+>i.replace(/^([A-Z])|[\s-_]+(\w)/g,(s,o,r)=>r?r.toUpperCase(
+color:[],number:[],var:[]},u=[];let g=0;const f=s.replace(Y2,b=>(Ue.test(b)?(r.color.push(g),u.push(Hx),o.p
+"willChange",r),r.add(s)}}function Kd(i){return i.replace(/([A-Z])/g,s=>`-${s.toLowerCase()}`)}const dN="fr
+const[r]=o.match(_d)||[];if(!r)return i;const u=o.replace(r,"");let g=bN.has(s)?1:0;return r!==o&&(g*=100),
+).map(b=>b.trim()).filter(b=>b.length>0).map(b=>b.replace(/^[\s•\-*※○]+/g,"").replace(/^\d+[\.\s\-]+/g,"").
+).map(y=>y.trim()).filter(y=>y.length>0).map(y=>y.replace(/^[\s•\-*※○]+/g,"").replace(/^\d+[\.\s\-]+/g,"").
+>{const x=b+1,y=u[b%u.length],N=g[b%g.length],k=N.replace(/[\.\?,!]+$/,"").trim(),M=k.charAt(0).toUpperCase
+,I=(z+" "+A).match(st);I&&I.length>0&&!A&&(A=I[0].replace(/[,.'")\]}]*$/,""));try{let J=p;if(!J&&A){Yt("⏳ Đ
+t)))||""),dt){let ct=decodeURIComponent(dt);ct=ct.replace(/\.html$/i,""),ct=ct.replace(/-i\.\d+\.\d+$/i,"")
+oUpperCase()+ve.slice(1).toLowerCase()).join(" ").replace(/\b(Shopee|Tiktok|Lazada|Mall|Affiliate|Vip|Hot|S
+ale)\b/gi,"").trim().replace(/\s+/g," "))}}catch{const dt=A.replace(/https?:\/
+oUpperCase()+ct.slice(1).toLowerCase()).join(" ").replace(/\b(Shopee|Tiktok|Lazada|Mall|Affiliate|Vip|Hot|S
+ale)\b/gi,"").trim().replace(/\s+/g," "))}J=yt||"Sản Phẩm Tiếp Thị Mới",sn(J)}
+t)))||""),ft){let Vt=decodeURIComponent(ft);Vt=Vt.replace(/\.html$/i,""),Vt=Vt.replace(/-i\.\d+\.\d+$/i,"")
+oUpperCase()+Zn.slice(1).toLowerCase()).join(" ").replace(/\b(Shopee|Tiktok|Lazada|Mall|Affiliate|Vip|Hot|S
+ale)\b/gi,"").trim().replace(/\s+/g," "))}}catch{const ft=p.replace(/https?:\/
+oUpperCase()+Vt.slice(1).toLowerCase()).join(" ").replace(/\b(Shopee|Tiktok|Lazada|Mall|Affiliate|Vip|Hot|S
+ale)\b/gi,"").trim().replace(/\s+/g," "))}let Et=J||"Sản Phẩm Tiếp Thị Cao Cấp
+:l.jsx("a",{href:`https://zalo.me/${A.phoneNumber.replace(/^0/,"84")}`,target:"_blank",rel:"noreferrer",cla
+{type:"button",onClick:()=>{const I=(p.title||"").replace(/[^a-zA-Z0-9\s]/g,"").trim()||"success",Et=`https
+cx,HeartPulse:rx,Baby:lx},_T=i=>{const s=i.trim().replace(/[\s.-]/g,"");if(!/^(03|05|07|08|09|(\+843)|(\+84
+;const ht=window.location.pathname;window.history.replaceState({},document.title,ht)}}const Z=T.get("licens
+tem("client_license_token",rt),Z&&(window.history.replaceState({},document.title,window.location.pathname),
+text:T},Z=T.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^\w\s]/g,"").rep
+r"&&rt.text.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^\w\s]/g,"").rep
+"bot",text:`🤖 (Lấy từ Lịch sử Trả lời): ${rt.text.replace(/^(🤖 \(Lấy từ Lịch sử Trả lời\):\s*)+/,"")}`,reco
