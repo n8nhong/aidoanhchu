@@ -230,11 +230,20 @@ const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('s
           const configRes = await fetch('/api/db-config');
           if (configRes.ok) {
             const config = await configRes.json();
+            // Nếu không có cấu hình Supabase, không thiết lập mặc định gây lỗi 400
+            // Để tránh truy cập vào URL không tồn tại, chỉ thiết lập khi config cung cấp
+            if (config.url) {
+              setDbSupabaseUrl(config.url);
+            }
             if (config.key) {
               setDbSupabaseKey(config.key);
-              setDbSupabaseUrl(config.url || 'https://encpsaatojnxgyjjcvnx.supabase.co');
+            }
+            // Save to localStorage only if values exist
+            if (config.key) {
               localStorage.setItem('supabase_key', config.key);
-              localStorage.setItem('supabase_url', config.url || 'https://encpsaatojnxgyjjcvnx.supabase.co');
+            }
+            if (config.url) {
+              localStorage.setItem('supabase_url', config.url);
             }
           }
         } catch(e) {}
@@ -466,36 +475,6 @@ const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('s
     const pushCloud = async () => {
       let url = localStorage.getItem('supabase_url') || '';
       let key = localStorage.getItem('supabase_key');
-      if (!key) {
-        try {
-          const configRes = await fetch('/api/db-config');
-          if (configRes.ok) {
-            const config = await configRes.json();
-            if (config.key) {
-              key = config.key;
-              if (config.url) url = config.url;
-            }
-          }
-        } catch (e) {}
-      }
-      
-      if (url && key) {
-        try {
-          // Delete missing ones
-          const idsToKeep = ['__SITE_CONFIG__', ...items.map(i => i.id)];
-          const joinedIds = idsToKeep.join(',');
-          await fetch(`${url}/rest/v1/online_products?id=not.in.(${joinedIds})`, {
-            method: 'DELETE',
-            headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
-          }).catch(e => console.error("Cloud purge error", e));
-
-          const tryPush = async (payloadItems: any[]) => {
-            // Chunk items to allow "thoải mái số lượng" without hitting Supabase payload limits
-            const chunkSize = 20;
-            for (let i = 0; i < payloadItems.length; i += chunkSize) {
-              const chunk = payloadItems.slice(i, i + chunkSize);
-              const res = await fetch(`${url}/rest/v1/online_products?on_conflict=id`, {
-                method: 'POST',
                 headers: { 
                   'apikey': key, 
                   'Authorization': `Bearer ${key}`,
