@@ -23,3 +23,4 @@ EXPOSE 8080
 
 # Chạy server
 CMD ["npm", "start"]
+# Force rebuild after title change (AIDOANHCHU)
