@@ -730,7 +730,7 @@ export default function App() {
   });
   const [showPublicLinkModal, setShowPublicLinkModal] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
-  const [customBrand, setCustomBrand] = useState(() => localStorage.getItem('custom_brand') || 'AffiliShop');
+  const [customBrand, setCustomBrand] = useState(() => localStorage.getItem('custom_brand') || 'AIDOANHCHU');
 
   useEffect(() => {
     document.title = customBrand;
