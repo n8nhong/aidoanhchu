@@ -1,8 +1,8 @@
 import express from "express";
-import { fetchShopeeProducts } from "./utils/shopeeScraper";
-import { generateProductContent } from "./utils/geminiClient";
-import { generateBackgroundImage } from "./utils/stableDiffusion";
-import { getSupabase } from "./utils/supabaseClient";
+import { fetchShopeeProducts } from "./src/utils/shopeeScraper";
+import { generateProductContent } from "./src/utils/geminiClient";
+import { generateBackgroundImage } from "./src/utils/stableDiffusion";
+import { getSupabase } from "./src/utils/supabaseClient";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";

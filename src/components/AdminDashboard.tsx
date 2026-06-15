@@ -523,6 +523,17 @@ const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('s
     const pushCloud = async () => {
       let url = localStorage.getItem('supabase_url') || '';
       let key = localStorage.getItem('supabase_key');
+      if (url && key) {
+        try {
+          const tryPush = async (mappedItems: any[]) => {
+            const chunkSize = 50;
+            const pushChunks = [];
+            for (let i = 0; i < mappedItems.length; i += chunkSize) {
+              pushChunks.push(mappedItems.slice(i, i + chunkSize));
+            }
+            for (const chunk of pushChunks) {
+              const res = await fetch(`${url}/rest/v1/online_products`, {
+                method: 'POST',
                 headers: { 
                   'apikey': key, 
                   'Authorization': `Bearer ${key}`,
