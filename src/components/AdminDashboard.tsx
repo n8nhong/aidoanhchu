@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { Product, Category, VisitorStats, Buyer, SearchQueryTrack } from '../types';
 import { MOCK_STATS } from '../mockData';
@@ -176,7 +176,8 @@ export function AdminDashboard({
   
   // Database Supabase States
   const [dbSupabaseUrl, setDbSupabaseUrl] = useState(() => localStorage.getItem('supabase_url') || '');
-const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('supabase_key') || '');
+  const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('supabase_key') || '');
+  const autoPublishSourceRef = useRef<EventSource | null>(null);
 
   const uploadImageToSupabase = async (file: File): Promise<string | null> => {
     const supabase = getSupabase();
@@ -213,6 +214,8 @@ const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('s
   
   const openDistrModal = (product: any) => {
     setDistrProduct(product);
+    // ensureProductImagesBucket(); // Đã comment vì policy đã tồn tại, tránh lỗi Duplicate
+
     setDistrIsShowOnHome(product.isShowOnHome || false);
     setDistrIsPublic(product.isPubliclyClaimable !== false);
     setDistrBuyers(product.allowedBuyerIds || []);
