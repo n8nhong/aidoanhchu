@@ -110,14 +110,17 @@ app.get("/api/auto-publish/stream", async (req, res) => {
         }
 
         sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lưu sản phẩm vào cơ sở dữ liệu...` });
-        const { error: dbError } = await supabase.from('products').upsert({
+        const { error: dbError } = await supabase.from('affiliate_products').upsert({
+          id: String(Date.now() + i),
           title: contentRes.title,
           description: contentRes.description,
-          image_url: imageUrl,
+          image: imageUrl,
           price: contentRes.price,
-          original_price: contentRes.originalPrice,
-          affiliate_link: prod.link,
-          category_id: autoCategorize(prod.title) // automatically assign category
+          originalPrice: contentRes.originalPrice,
+          affiliateLink: prod.link,
+          categoryId: autoCategorize(prod.title),
+          soldCount: prod.salesCount || 0,
+          postDate: new Date().toISOString()
         }, { returning: 'minimal' });
 
         if (dbError) {
@@ -131,24 +134,23 @@ app.get("/api/auto-publish/stream", async (req, res) => {
       }
     }
 
-    sendEvent({ type: 'log', message: `Đang đồng bộ dữ liệu vào bảng online_products...` });
-    const onlineProducts = toProcess.map(p => ({
-      id: p.id,
+    sendEvent({ type: 'log', message: `Đang đồng bộ dữ liệu vào bảng digital_products...` });
+    const onlineProducts = toProcess.map((p, idx) => ({
+      id: String(Date.now() + 1000 + idx),
       title: p.title,
-      type: 'digital',
       price: p.price,
-      originalprice: p.originalPrice,
-      isfree: false,
-      downloadurl: null,
-      htmlcontent: null,
-      isshowonhome: true,
-      issystemgenerated: true,
-      ispubliclyclaimable: true,
-      allowedbuyerids: null
+      originalPrice: p.originalPrice || 0,
+      isFree: false,
+      downloadUrl: null,
+      htmlContent: null,
+      isShowOnHome: true,
+      isSystemGenerated: true,
+      isPubliclyClaimable: true,
+      allowedBuyerIds: null
     }));
     
     if (onlineProducts.length > 0) {
-      const { error: opError } = await supabase.from('online_products').upsert(onlineProducts, { returning: 'minimal' });
+      const { error: opError } = await supabase.from('digital_products').upsert(onlineProducts, { returning: 'minimal' });
       if (opError) {
         sendEvent({ type: 'log', message: `Lỗi đồng bộ online_products: ${opError.message}` });
       } else {

@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 
 /**
  * Generate a new background image for a product using Replicate Stable Diffusion.

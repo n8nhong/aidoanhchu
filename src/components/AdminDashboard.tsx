@@ -532,7 +532,7 @@ const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('s
               pushChunks.push(mappedItems.slice(i, i + chunkSize));
             }
             for (const chunk of pushChunks) {
-              const res = await fetch(`${url}/rest/v1/online_products`, {
+              const res = await fetch(`${url}/rest/v1/digital_products`, {
                 method: 'POST',
                 headers: { 
                   'apikey': key, 
@@ -554,37 +554,18 @@ const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('s
               await tryPush(items.map(item => ({
                  id: item.id,
                  title: item.title || '',
-                 type: item.type || null,
                  price: item.price || 0,
-                 originalPrice: item.originalPrice || 0,
-                 isFree: item.isFree !== undefined ? item.isFree : false,
-                 downloadUrl: item.downloadUrl || null,
-                 htmlContent: item.htmlContent || null,
-                 isShowOnHome: item.isShowOnHome !== undefined ? item.isShowOnHome : false,
-                 isSystemGenerated: item.isSystemGenerated !== undefined ? item.isSystemGenerated : false,
-                 isPubliclyClaimable: item.isPubliclyClaimable !== undefined ? item.isPubliclyClaimable : true,
-                 allowedBuyerIds: item.allowedBuyerIds || null
+                 "originalPrice": item.originalPrice || 0,
+                 "isFree": item.isFree !== undefined ? item.isFree : false,
+                 "downloadUrl": item.downloadUrl || null,
+                 "htmlContent": item.htmlContent || null,
+                 "isShowOnHome": item.isShowOnHome !== undefined ? item.isShowOnHome : false,
+                 "isSystemGenerated": item.isSystemGenerated !== undefined ? item.isSystemGenerated : false,
+                 "isPubliclyClaimable": item.isPubliclyClaimable !== undefined ? item.isPubliclyClaimable : true,
+                 "allowedBuyerIds": item.allowedBuyerIds || null
               })));
             } catch (e: any) {
-              const msg = e.message || String(e);
-              if (msg.includes("Could not find the") && msg.includes("column")) {
-                await tryPush(items.map(item => ({
-                   id: item.id,
-                   title: item.title || '',
-                   type: item.type || null,
-                   price: item.price || 0,
-                   originalprice: item.originalPrice || 0,
-                   isfree: item.isFree !== undefined ? item.isFree : false,
-                   downloadurl: item.downloadUrl || null,
-                   htmlcontent: item.htmlContent || null,
-                   isshowonhome: item.isShowOnHome !== undefined ? item.isShowOnHome : false,
-                   issystemgenerated: item.isSystemGenerated !== undefined ? item.isSystemGenerated : false,
-                   ispubliclyclaimable: item.isPubliclyClaimable !== undefined ? item.isPubliclyClaimable : true,
-                   allowedbuyerids: item.allowedBuyerIds || null
-                })));
-              } else {
-                throw e;
-              }
+              console.error("Error during tryPush in saveOnlineProducts", e);
             }
           }
         } catch (e) {
