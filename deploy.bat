@@ -11,8 +11,8 @@ echo.
 echo ==== DEPLOY WEB AFFILISHOP ====
 echo.
 echo Neu ban can tao anh san pham bang RTX 3060:
-echo   1. Mo thu muc may-tao-anh-ai
-echo   2. Chay start.bat va GIU cua so do mo
+echo   1. Mo thu muc C:\may-tao-anh-ai
+echo   2. Chay CHAY.bat va GIU cua so do mo
 echo   3. Quay lai day chay deploy.bat
 echo.
 pause
@@ -36,13 +36,8 @@ if not exist "package.json" (
     exit /b 1
 )
 
-echo ==== Khởi tạo tài nguyên ====
+echo ==== Khoi tao tai nguyen (Supabase bucket - neu co .env) ====
 node scripts/createBucket.js
-if errorlevel 1 (
-    echo Lỗi khi tạo bucket.
-    pause
-    exit /b 1
-)
 
 echo ==== Cài đặt dependencies (npm install) ==== 
 npm install
