@@ -27,14 +27,30 @@ function loadSupabaseConfig() {
   return { url, key };
 }
 
+function isValidSupabaseKey(key) {
+  if (!key || typeof key !== 'string') return false;
+  const trimmed = key.trim();
+  if (trimmed.length < 100) return false;
+  if (trimmed.includes('DIEN_') || trimmed.includes('paste_') || trimmed.includes('YOUR_')) return false;
+  // JWT anon key: eyJhbGci...header.payload.signature
+  return trimmed.startsWith('eyJ') && trimmed.split('.').length === 3;
+}
+
 async function createBucket() {
   const { url: supabaseUrl, key: supabaseKey } = loadSupabaseConfig();
 
-  if (!supabaseKey) {
-    console.warn('⚠️  Bo qua tao bucket: chua co SUPABASE_KEY.');
-    console.warn('   Tao file .env voi VITE_SUPABASE_URL va VITE_SUPABASE_ANON_KEY');
-    console.warn('   (lay tu Supabase Dashboard > Settings > API > anon public key)');
-    console.warn('   Hoac cau hinh trong Admin web > tab Database roi chay lai.');
+  if (!isValidSupabaseKey(supabaseKey)) {
+    console.warn('');
+    console.warn('⚠️  BO QUA TAO BUCKET - Supabase key chua dung!');
+    console.warn('');
+    console.warn('   Ban dang de text gia (DIEN_ANON_KEY...) trong file .env');
+    console.warn('   Can thay bang key THAT tu Supabase:');
+    console.warn('');
+    console.warn('   1. Vao: https://supabase.com/dashboard/project/encpsaatojnxgyjjcvnx/settings/api');
+    console.warn('   2. Copy key "anon" "public" (bat dau bang eyJ..., rat dai)');
+    console.warn('   3. Dan vao file .env -> VITE_SUPABASE_ANON_KEY va SUPABASE_KEY');
+    console.warn('   4. Chay lai deploy.bat');
+    console.warn('');
     process.exit(0);
   }
 

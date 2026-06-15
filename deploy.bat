@@ -25,9 +25,15 @@ rem === Bước 2: Thêm và commit các thay đổi (nếu có) ===
 git add .
 git commit -m "Auto deploy – cập nhật code" || echo No changes to commit.
 
-rem === Bước 3: Đẩy lên GitHub ===
-echo ==== Đẩy lên GitHub ==== 
+rem === Buoc 3: Day len GitHub (bo qua neu bi chan secret) ===
+echo ==== Day len GitHub ==== 
 git push origin main
+if errorlevel 1 (
+  echo.
+  echo CANH BAO: GitHub tu choi push ^(co the do key GCP trong lich su commit^).
+  echo Tiep tuc build va deploy local...
+  echo.
+)
 
 rem === Bước 4: Cài đặt dependencies ===
 if not exist "package.json" (
