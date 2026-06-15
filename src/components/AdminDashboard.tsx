@@ -5060,7 +5060,7 @@ export function AdminDashboard({
               </div>
 
               {apStatus !== 'idle' && (
-                <div className="space-y-4 pt-6 border-t border-gray-200">
+                <div className="space-y-4 pt-6 border-t border-gray-200 notranslate" translate="no">
                   <div className="flex justify-between items-center text-sm font-bold">
                     <span className="text-gray-700">Tiến trình hiện tại:</span>
                     <span className="text-shopee-orange">{apProgress.current} / {apProgress.total}</span>

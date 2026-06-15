@@ -250,9 +250,9 @@ export default function App() {
       if (url && key) {
         try {
           const [digRes, affRes, giftRes] = await Promise.all([
-            fetch(`${url}/rest/v1/digital_products?t=${Date.now()}`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' }),
-            fetch(`${url}/rest/v1/affiliate_products?t=${Date.now()}`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' }),
-            fetch(`${url}/rest/v1/gifts?t=${Date.now()}`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' })
+            fetch(`${url}/rest/v1/digital_products`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' }),
+            fetch(`${url}/rest/v1/affiliate_products`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' }),
+            fetch(`${url}/rest/v1/gifts`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' })
           ]);
 
           let fetchedSiteConfigStr = null;
@@ -353,7 +353,7 @@ export default function App() {
             }
           }
           // Fetch buyers
-          const bRes = await fetch(`${url}/rest/v1/buyers?t=${Date.now()}`, {
+          const bRes = await fetch(`${url}/rest/v1/buyers`, {
             headers: { 'apikey': key, 'Authorization': `Bearer ${key}` },
             cache: 'no-store'
           });
