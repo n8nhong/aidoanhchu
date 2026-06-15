@@ -5315,44 +5315,6 @@ export function AdminDashboard({
 
       {adminTab === 'auto_publish' && (
         <div className="space-y-6 max-w-5xl mx-auto">
-          {/* Shopee Affiliate Commission Explanation */}
-          <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-6 rounded-xl border-2 border-amber-300 shadow-lg">
-            <h2 className="text-2xl font-black text-amber-900 mb-4 flex items-center gap-2">
-              💰 Cách Kiếm Hoa Hồng Shopee Affiliate
-            </h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-white p-4 rounded-lg border border-amber-200">
-                <p className="text-sm font-bold text-gray-800 mb-3">📱 Quy Trình Hoạt Động:</p>
-                <ul className="space-y-2 text-xs text-gray-700">
-                  <li>✅ <strong>Khách bấm link affiliate</strong> (link từ CSV)</li>
-                  <li>✅ <strong>Mở sản phẩm Shopee</strong> (được theo dõi bởi Shopee)</li>
-                  <li>✅ <strong>Khách mua trong 24h</strong> (hoặc thời gian quy định)</li>
-                  <li>✅ <strong>Bạn được hoa hồng tự động</strong> (ghi nhận trên Shopee Affiliate)</li>
-                  <li>✅ <strong>Rút tiền về tài khoản</strong> (tháng kế tiếp)</li>
-                </ul>
-              </div>
-
-              <div className="bg-white p-4 rounded-lg border border-amber-200">
-                <p className="text-sm font-bold text-gray-800 mb-3">🔗 Công Thức Hoa Hồng:</p>
-                <div className="space-y-3 text-xs text-gray-700">
-                  <div className="bg-amber-50 p-2 rounded border border-amber-200">
-                    <p><strong>Giá bán:</strong> 343.000 VNĐ</p>
-                    <p><strong>Tỷ lệ hoa hồng:</strong> 10%</p>
-                    <p><strong className="text-amber-700">Hoa hồng bạn nhận:</strong> 34.300 VNĐ</p>
-                  </div>
-                  <p>💡 <strong>Lưu ý:</strong> Hoa hồng được Shopee tính và cộng tự động vào tài khoản Affiliate của bạn</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 bg-amber-100 border border-amber-300 rounded-lg p-3">
-              <p className="text-xs text-amber-900">
-                <strong>⚠️ Quan Trọng:</strong> Nhập <strong>Offer Link</strong> (chứ không phải Product Link) để đảm bảo Shopee theo dõi được và tính hoa hồng cho bạn. Offer Link bao gồm ID Affiliate của bạn.
-              </p>
-            </div>
-          </div>
-
           {/* CSV Auto-Import Section */}
           <div className="bg-gradient-to-br from-cyan-50 to-blue-50 p-6 rounded-xl border-2 border-cyan-300 shadow-lg">
             <h2 className="text-2xl font-black text-cyan-900 mb-2 flex items-center gap-2">
@@ -5908,8 +5870,57 @@ export function AdminDashboard({
               </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-700 rounded p-4 text-emerald-400 font-mono text-[10px] overflow-auto shadow-inner relative max-h-80">
+            <div className="bg-blue-950 border border-blue-700 rounded p-4 text-blue-300 font-mono text-[10px] overflow-auto shadow-inner relative max-h-60">
+              <div className="text-white font-bold opacity-80 mb-2 border-b border-blue-800 pb-2">🔍 KIỂM TRA AFFILIATE_PRODUCTS TABLE</div>
+              <button 
+                onClick={() => {
+                  const checkSql = `SELECT to_regclass('public.affiliate_products');`;
+                  navigator.clipboard.writeText(checkSql);
+                  alert('✅ Đã copy lệnh kiểm tra! Dán vào SQL Editor để xem table có tồn tại không.\n\nNếu kết quả là NULL → cần chạy CREATE TABLE bên dưới.');
+                }}
+                className="absolute top-2 right-2 bg-blue-700 hover:bg-blue-600 text-white px-2 py-0.5 rounded text-[9px] cursor-pointer"
+              >
+                Copy Check
+              </button>
+              <pre className="whitespace-pre-wrap leading-relaxed select-all text-blue-300">SELECT to_regclass('public.affiliate_products');</pre>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-700 rounded p-4 text-emerald-400 font-mono text-[10px] overflow-auto shadow-inner relative max-h-80 mt-4">
               <div className="text-white font-bold opacity-80 mb-2 border-b border-slate-800 pb-2">📦 MÃ SQL TẠO BẢNG CHUẨN (Chạy ở SQL Editor Supabase)</div>
+              <button 
+                onClick={() => {
+                  const sql = `CREATE TABLE IF NOT EXISTS public.affiliate_products (
+  id text PRIMARY KEY,
+  title text NOT NULL,
+  price numeric,
+  "originalPrice" numeric,
+  "discountPercent" numeric,
+  image text,
+  "videoUrl" text,
+  "categoryId" text,
+  "affiliateLink" text,
+  platform text,
+  "soldCount" numeric,
+  description text,
+  "isSuggested" boolean,
+  "isDirectProduct" boolean,
+  "postDate" text,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_affiliate_products_created ON public.affiliate_products(created_at DESC);
+
+ALTER TABLE public.affiliate_products ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow ALL" ON public.affiliate_products FOR ALL USING (true) WITH CHECK (true);`;
+                  navigator.clipboard.writeText(sql);
+                  alert('✅ Đã copy SQL tạo affiliate_products! Dán vào SQL Editor rồi bấm Run.');
+                }}
+                className="absolute top-2 right-12 bg-orange-700 hover:bg-orange-600 text-white px-2 py-0.5 rounded text-[9px] cursor-pointer"
+              >
+                📌 Copy Affiliate SQL
+              </button>
               <button 
                 onClick={() => {
                   const sql = `-- Chạy mã này trong Supabase > SQL Editor để tạo bảng:
@@ -5978,7 +5989,7 @@ CREATE POLICY "Allow ALL" ON public.affiliate_products FOR ALL USING (true) WITH
                   navigator.clipboard.writeText(sql);
                   alert('Đã copy mã SQL!');
                 }}
-                className="absolute top-2 right-2 bg-slate-700 hover:bg-slate-600 text-white px-2 py-0.5 rounded text-[9px] cursor-pointer"
+                className="absolute top-2 right-32 bg-slate-700 hover:bg-slate-600 text-white px-2 py-0.5 rounded text-[9px] cursor-pointer"
               >
                 Copy SQL
               </button>

@@ -251,7 +251,7 @@ export default function App() {
         try {
           const [digRes, affRes, giftRes] = await Promise.all([
             fetch(`${url}/rest/v1/digital_products`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' }),
-            fetch(`/api/affiliate-products`, { cache: 'no-store' }),
+            fetch(`${url}/rest/v1/affiliate_products?order=created_at.desc&limit=100`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' }),
             fetch(`${url}/rest/v1/gifts`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' })
           ]);
 
@@ -299,6 +299,11 @@ export default function App() {
                     localStorage.setItem('affili_products', JSON.stringify(normalizedAff));
                  }
              }
+          } else {
+             // Log error if affiliate_products table has issues
+             console.warn('Lỗi fetch affiliate_products:', affRes.status);
+             const affErrorText = await affRes.text();
+             console.log('Lỗi chi tiết:', affErrorText);
           }
 
           if (giftRes.ok) {
