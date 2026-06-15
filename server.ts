@@ -2,7 +2,7 @@ import express from "express";
 import { fetchShopeeProducts } from "./src/utils/shopeeScraper";
 import { generateProductContent } from "./src/utils/geminiClient";
 import { generateBackgroundImage } from "./src/utils/stableDiffusion";
-import { getSupabase } from "./src/utils/supabaseClient";
+import { createClient } from "@supabase/supabase-js";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -40,9 +40,9 @@ async function startServer() {
   // Store data persistently during instance lifetime so "tạo rồi chia sẻ link" works
   // Ensure Supabase storage bucket for product images exists
 async function ensureProductImagesBucket() {
-  const supabase = getSupabase(globalSupabaseConfig.url, globalSupabaseConfig.key);
-  if (!supabase) return;
+  if (!globalSupabaseConfig.url || !globalSupabaseConfig.key) return;
   try {
+    const supabase = createClient(globalSupabaseConfig.url, globalSupabaseConfig.key);
     // @ts-ignore Supabase storage createBucket may be available in the client
     const { data, error } = await supabase.storage.createBucket('product-images', { public: true });
     if (error) {
@@ -89,17 +89,21 @@ app.get("/api/auto-publish/stream", async (req, res) => {
 
     sendEvent({ type: 'log', message: `Đã tìm thấy ${toProcess.length} sản phẩm thỏa mãn điều kiện (>1000 lượt bán, hoa hồng >=12%).` });
 
-    const qUrl = req.query.url as string;
-    const qKey = req.query.key as string;
+    const qUrl = (req.query.url as string || '').trim();
+    const qKey = (req.query.key as string || '').trim();
     
-    const finalUrl = qUrl || globalSupabaseConfig.url;
-    const finalKey = qKey || globalSupabaseConfig.key;
+    const finalUrl = qUrl || globalSupabaseConfig.url || '';
+    const finalKey = qKey || globalSupabaseConfig.key || '';
 
-    const supabase = getSupabase(finalUrl, finalKey);
-    if (!supabase) {
+    console.log('[Auto Publish] finalUrl:', finalUrl ? finalUrl.substring(0, 30) + '...' : '(trống)');
+    console.log('[Auto Publish] finalKey:', finalKey ? finalKey.substring(0, 10) + '...' : '(trống)');
+
+    if (!finalUrl || !finalKey) {
       sendEvent({ type: 'error', message: 'Supabase chưa được cấu hình. Vui lòng kiểm tra tab Database.' });
       return res.end();
     }
+
+    const supabase = createClient(finalUrl, finalKey);
 
     const results: any[] = [];
     for (let i = 0; i < toProcess.length; i++) {
