@@ -4,10 +4,10 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
  * Trả về một instance Supabase đã được cấu hình hợp lệ.
  * Nếu URL hoặc Key chưa được thiết lập hoặc không hợp lệ, sẽ hiển thị cảnh báo và trả về null.
  */
-export const getSupabase = (): SupabaseClient | null => {
+export const getSupabase = (customUrl?: string, customKey?: string): SupabaseClient | null => {
   const isBrowser = typeof window !== 'undefined';
-  const rawUrl = isBrowser ? (localStorage.getItem('supabase_url') || '').trim() : (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
-  const rawKey = isBrowser ? (localStorage.getItem('supabase_key') || '').trim() : (process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '').trim();
+  const rawUrl = customUrl || (isBrowser ? (localStorage.getItem('supabase_url') || '').trim() : (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim());
+  const rawKey = customKey || (isBrowser ? (localStorage.getItem('supabase_key') || '').trim() : (process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '').trim());
 
   if (!rawUrl || !rawKey) {
     if (isBrowser) alert('❌ Vui lòng cấu hình Supabase URL và Key trong tab Hệ thống trước khi sử dụng.');

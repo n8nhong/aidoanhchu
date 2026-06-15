@@ -40,7 +40,7 @@ async function startServer() {
   // Store data persistently during instance lifetime so "tạo rồi chia sẻ link" works
   // Ensure Supabase storage bucket for product images exists
 async function ensureProductImagesBucket() {
-  const supabase = getSupabase();
+  const supabase = getSupabase(globalSupabaseConfig.url, globalSupabaseConfig.key);
   if (!supabase) return;
   try {
     // @ts-ignore Supabase storage createBucket may be available in the client
@@ -92,13 +92,10 @@ app.get("/api/auto-publish/stream", async (req, res) => {
     const qUrl = req.query.url as string;
     const qKey = req.query.key as string;
     
-    if (qUrl) process.env.SUPABASE_URL = qUrl;
-    else if (globalSupabaseConfig.url) process.env.SUPABASE_URL = globalSupabaseConfig.url;
-    
-    if (qKey) process.env.SUPABASE_KEY = qKey;
-    else if (globalSupabaseConfig.key) process.env.SUPABASE_KEY = globalSupabaseConfig.key;
+    const finalUrl = qUrl || globalSupabaseConfig.url;
+    const finalKey = qKey || globalSupabaseConfig.key;
 
-    const supabase = getSupabase();
+    const supabase = getSupabase(finalUrl, finalKey);
     if (!supabase) {
       sendEvent({ type: 'error', message: 'Supabase chưa được cấu hình. Vui lòng kiểm tra tab Database.' });
       return res.end();
