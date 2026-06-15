@@ -53,8 +53,9 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSlidesForTopic } from '../utils/giftSlidesData';
-import { readCSVFile, parseCSV, parsePrice } from '../utils/csvProcessor';
+import { readCSVFile, parseCSV, parsePrice, validateShopeeLink, createStoreSlug, fetchShopeeImage } from '../utils/csvProcessor';
 import { replaceBackground, PRESET_BACKGROUNDS } from '../utils/imageProcessor';
+import { generateProductContent } from '../utils/geminiClient';
 
 // compressImage is now imported from ../utils
 
@@ -559,18 +560,88 @@ export function AdminDashboard({
     });
 
     let successCount = 0;
+    let skippedCount = 0;
 
     for (let i = 0; i < csvProducts.length; i++) {
       const product = csvProducts[i];
       
       try {
+        // 1️⃣ VALIDATE LINK
+        const isValidLink = validateShopeeLink(product.offerLink || product.productLink);
+        if (!isValidLink) {
+          setCsvProcessing({
+            isProcessing: true,
+            currentIndex: i + 1,
+            total: csvProducts.length,
+            message: `⏭️ [${i + 1}/${csvProducts.length}] Link hỏng - bỏ qua`
+          });
+          skippedCount++;
+          await new Promise(resolve => setTimeout(resolve, 200));
+          continue;
+        }
+
+        // 2️⃣ CREATE STORE CATEGORY
+        const storeSlug = createStoreSlug(product.shopName);
+        let storeCategory = categories.find(c => c.name.toLowerCase() === product.shopName.toLowerCase());
+        
+        if (!storeCategory) {
+          storeCategory = {
+            id: 'store_' + Date.now() + '_' + i,
+            name: product.shopName,
+            description: `Gian hàng: ${product.shopName}`,
+            icon: 'ShoppingBag'
+          };
+          
+          if (onSetCategories) {
+            onSetCategories(prev => [...prev, storeCategory]);
+          }
+        }
+
+        // 3️⃣ FETCH IMAGE FROM SHOPEE
+        let imageUrl = '';
         setCsvProcessing({
           isProcessing: true,
           currentIndex: i + 1,
           total: csvProducts.length,
-          message: `[${i + 1}/${csvProducts.length}] ${product.itemName.substring(0, 30)}...`
+          message: `📷 [${i + 1}/${csvProducts.length}] Tải ảnh: ${product.itemName.substring(0, 30)}...`
         });
 
+        try {
+          imageUrl = await fetchShopeeImage(product.offerLink || product.productLink);
+        } catch (imgErr) {
+          console.warn('Lỗi tải ảnh:', imgErr);
+          // Tiếp tục mà không có ảnh
+        }
+
+        // 4️⃣ GENERATE AI DESCRIPTION
+        let aiDescription = product.itemName;
+        const geminiKey = geminiKeys?.find((k: any) => k.isActive)?.key;
+        
+        if (csvConfig.autoDescription && geminiKey) {
+          try {
+            setCsvProcessing({
+              isProcessing: true,
+              currentIndex: i + 1,
+              total: csvProducts.length,
+              message: `✍️ [${i + 1}/${csvProducts.length}] Sinh mô tả AI...`
+            });
+
+            const aiContent = await generateProductContent({
+              apiKey: geminiKey,
+              productName: product.itemName,
+              categoryId: storeCategory.id,
+              extraInfo: `Gian hàng: ${product.shopName}, Bán: ${product.sales}, Hoa hồng: ${product.commissionRate}`,
+              price: parsePrice(product.price)
+            });
+
+            aiDescription = aiContent.description || aiDescription;
+          } catch (aiErr) {
+            console.warn('Lỗi AI:', aiErr);
+            aiDescription = `${product.itemName}\n\n${product.shopName} - Sản phẩm chất lượng cao, ${product.sales} lượt bán, được yêu thích bởi khách hàng. Hoa hồng: ${product.commissionRate}.`;
+          }
+        }
+
+        // 5️⃣ CREATE PRODUCT
         const basePrice = parsePrice(product.price);
         const markupPrice = Math.round(basePrice * (1 + csvConfig.autoPriceMarkup / 100));
 
@@ -580,14 +651,12 @@ export function AdminDashboard({
           price: markupPrice,
           originalPrice: basePrice,
           discountPercent: Math.round(((basePrice - markupPrice) / basePrice) * 100),
-          image: '',
-          categoryId: csvConfig.autoCategory ? autoCategorize(product.itemName) : '1',
+          image: imageUrl || '',
+          categoryId: storeCategory.id,
           affiliateLink: product.offerLink || product.productLink,
           platform: 'shopee',
           soldCount: parseInt(product.sales.replace(/[^\d]/g, '')) || 0,
-          description: csvConfig.autoDescription
-            ? `${product.itemName}. Sản phẩm chất lượng cao từ Shopee.`
-            : product.itemName,
+          description: aiDescription,
           isSuggested: true,
           isDirectProduct: false,
           videoUrl: '',
@@ -596,9 +665,18 @@ export function AdminDashboard({
 
         onAddProduct(newProduct);
         successCount++;
+
+        setCsvProcessing({
+          isProcessing: true,
+          currentIndex: i + 1,
+          total: csvProducts.length,
+          message: `✅ [${i + 1}/${csvProducts.length}] Đã tạo: ${product.itemName.substring(0, 30)}...`
+        });
+
         await new Promise(resolve => setTimeout(resolve, 300));
       } catch (error) {
         console.error(`Lỗi xử lý sản phẩm ${i}:`, error);
+        skippedCount++;
       }
     }
 
@@ -606,10 +684,10 @@ export function AdminDashboard({
       isProcessing: false,
       currentIndex: successCount,
       total: csvProducts.length,
-      message: `✅ Hoàn thành! Đã tạo ${successCount}/${csvProducts.length} sản phẩm`
+      message: `✅ Hoàn thành! Đã tạo ${successCount}/${csvProducts.length} sản phẩm${skippedCount > 0 ? ` (bỏ qua ${skippedCount} link hỏng)` : ''}`
     });
 
-    setSuccessMsg(`✅ Đã tạo ${successCount} sản phẩm từ CSV!`);
+    setSuccessMsg(`✅ Đã tạo ${successCount} sản phẩm từ CSV!${skippedCount > 0 ? `\n⏭️ Bỏ qua ${skippedCount} link hỏng` : ''}`);
   };
 
   const startAutoPublish = async () => {
@@ -5168,6 +5246,44 @@ export function AdminDashboard({
 
       {adminTab === 'auto_publish' && (
         <div className="space-y-6 max-w-5xl mx-auto">
+          {/* Shopee Affiliate Commission Explanation */}
+          <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-6 rounded-xl border-2 border-amber-300 shadow-lg">
+            <h2 className="text-2xl font-black text-amber-900 mb-4 flex items-center gap-2">
+              💰 Cách Kiếm Hoa Hồng Shopee Affiliate
+            </h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-white p-4 rounded-lg border border-amber-200">
+                <p className="text-sm font-bold text-gray-800 mb-3">📱 Quy Trình Hoạt Động:</p>
+                <ul className="space-y-2 text-xs text-gray-700">
+                  <li>✅ <strong>Khách bấm link affiliate</strong> (link từ CSV)</li>
+                  <li>✅ <strong>Mở sản phẩm Shopee</strong> (được theo dõi bởi Shopee)</li>
+                  <li>✅ <strong>Khách mua trong 24h</strong> (hoặc thời gian quy định)</li>
+                  <li>✅ <strong>Bạn được hoa hồng tự động</strong> (ghi nhận trên Shopee Affiliate)</li>
+                  <li>✅ <strong>Rút tiền về tài khoản</strong> (tháng kế tiếp)</li>
+                </ul>
+              </div>
+
+              <div className="bg-white p-4 rounded-lg border border-amber-200">
+                <p className="text-sm font-bold text-gray-800 mb-3">🔗 Công Thức Hoa Hồng:</p>
+                <div className="space-y-3 text-xs text-gray-700">
+                  <div className="bg-amber-50 p-2 rounded border border-amber-200">
+                    <p><strong>Giá bán:</strong> 343.000 VNĐ</p>
+                    <p><strong>Tỷ lệ hoa hồng:</strong> 10%</p>
+                    <p><strong className="text-amber-700">Hoa hồng bạn nhận:</strong> 34.300 VNĐ</p>
+                  </div>
+                  <p>💡 <strong>Lưu ý:</strong> Hoa hồng được Shopee tính và cộng tự động vào tài khoản Affiliate của bạn</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 bg-amber-100 border border-amber-300 rounded-lg p-3">
+              <p className="text-xs text-amber-900">
+                <strong>⚠️ Quan Trọng:</strong> Nhập <strong>Offer Link</strong> (chứ không phải Product Link) để đảm bảo Shopee theo dõi được và tính hoa hồng cho bạn. Offer Link bao gồm ID Affiliate của bạn.
+              </p>
+            </div>
+          </div>
+
           {/* CSV Auto-Import Section */}
           <div className="bg-gradient-to-br from-cyan-50 to-blue-50 p-6 rounded-xl border-2 border-cyan-300 shadow-lg">
             <h2 className="text-2xl font-black text-cyan-900 mb-2 flex items-center gap-2">

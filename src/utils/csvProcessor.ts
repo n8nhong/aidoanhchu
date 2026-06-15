@@ -91,3 +91,75 @@ export const parsePrice = (priceStr: string): number => {
 export const formatPrice = (price: number): string => {
   return price.toLocaleString('vi-VN', { style: 'currency', currency: 'VND' });
 };
+
+/**
+ * Xác thực link Shopee có hợp lệ không
+ */
+export const validateShopeeLink = (link: string): boolean => {
+  if (!link) return false;
+  try {
+    const url = new URL(link);
+    const validDomains = ['shopee.vn', 'shopee.com', 'affiliate.shopee.vn'];
+    return validDomains.some(domain => url.hostname.includes(domain)) && 
+           url.pathname.includes('/product/');
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Tạo slug từ shop name để làm danh mục
+ */
+export const createStoreSlug = (shopName: string): string => {
+  return shopName
+    .toLowerCase()
+    .replace(/[àáạảãâầấậẩẫăằắặẳẵ]/g, 'a')
+    .replace(/[èéẹẻẽêềếệểễ]/g, 'e')
+    .replace(/[ìíịỉĩ]/g, 'i')
+    .replace(/[òóọỏõôồốộổỗơờớợởỡ]/g, 'o')
+    .replace(/[ùúụủũưừứựửữ]/g, 'u')
+    .replace(/[ỳýỵỷỹ]/g, 'y')
+    .replace(/[đ]/g, 'd')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+};
+
+/**
+ * Tải ảnh từ link Shopee (extract image từ product page)
+ */
+export const fetchShopeeImage = async (productLink: string): Promise<string> => {
+  try {
+    // Nếu là affiliate link, chuyển thành product link
+    const link = productLink.replace('affiliate.shopee.vn', 'shopee.vn');
+    
+    // Trích xuất product ID
+    const match = link.match(/\/product\/(\d+)/);
+    if (!match) return '';
+    
+    const productId = match[1];
+    
+    // Sử dụng Shopee API để lấy thông tin sản phẩm và ảnh
+    const shopMatch = link.match(/\/shop\/([a-zA-Z0-9_-]+)/);
+    if (!shopMatch) return '';
+    
+    const shopId = shopMatch[1];
+    
+    // API endpoint để lấy product detail
+    const apiUrl = `https://shopee.vn/api/v2/product/get_product_detail?product_id=${productId}&shop_id=${shopId}`;
+    
+    const response = await fetch(apiUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+    
+    if (!response.ok) return '';
+    
+    const data = await response.json();
+    const imageUrl = data?.data?.product?.image;
+    return imageUrl || '';
+  } catch (error) {
+    console.error('Lỗi tải ảnh từ Shopee:', error);
+    return '';
+  }
+};
