@@ -60,8 +60,14 @@ app.get("/api/auto-publish/stream", async (req, res) => {
     
     sendEvent({ type: 'log', message: 'Bắt đầu cào dữ liệu từ Shopee...' });
     const rawProducts = await fetchShopeeProducts();
-    const filtered = rawProducts.filter(p => (p.sales || 0) > 1000 && (p.commissionRate || 0) >= 12);
-    const toProcess = filtered.slice(0, limit);
+    let filtered = rawProducts.filter(p => (p.salesCount || 0) > 1000 && (p.commissionRate || 0) >= 12);
+    if (filtered.length === 0) {
+      sendEvent({ type: 'log', message: '⚠️ Không có sản phẩm thỏa mãn tiêu chí, sẽ dùng toàn bộ dữ liệu thu thập được.' });
+      filtered = rawProducts.slice(0, limit);
+    } else {
+      filtered = filtered.slice(0, limit);
+    }
+    const toProcess = filtered;
 
     sendEvent({ type: 'log', message: `Đã tìm thấy ${toProcess.length} sản phẩm thỏa mãn điều kiện (>1000 lượt bán, hoa hồng >=12%).` });
 
