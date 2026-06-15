@@ -54,8 +54,10 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { getSlidesForTopic } from '../utils/giftSlidesData';
 import { readCSVFile, parseCSV, parsePrice, validateShopeeLink, createStoreSlug, fetchShopeeImage } from '../utils/csvProcessor';
-import { replaceBackground, PRESET_BACKGROUNDS } from '../utils/imageProcessor';
+import { replaceBackground, PRESET_BACKGROUNDS, processProductImageWithNewBackground, dataUrlToFile } from '../utils/imageProcessor';
 import { generateProductContent } from '../utils/geminiClient';
+import { generateBackgroundImageHF, testHuggingFaceToken } from '../utils/huggingfaceAPI';
+import { ImageUploadModal } from './ImageUploadModal';
 
 // compressImage is now imported from ../utils
 
@@ -176,10 +178,16 @@ export function AdminDashboard({
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [pwOld, setPwOld] = useState('');
   const [pwNew, setPwNew] = useState('');
+
+  // Image Upload Modal States
+  const [showImageUploadModal, setShowImageUploadModal] = useState(false);
+  const [uploadingProductId, setUploadingProductId] = useState('');
+  const [uploadingProductName, setUploadingProductName] = useState('');
   
   // Database Supabase States
   const [dbSupabaseUrl, setDbSupabaseUrl] = useState(() => localStorage.getItem('supabase_url') || '');
   const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('supabase_key') || '');
+  const [hfToken, setHfToken] = useState(() => localStorage.getItem('huggingface_token') || '');
   const autoPublishSourceRef = useRef<EventSource | null>(null);
 
   const uploadImageToSupabase = async (file: File): Promise<string | null> => {
@@ -480,7 +488,8 @@ export function AdminDashboard({
     backgroundColor: PRESET_BACKGROUNDS.WHITE,
     autoDescription: true,
     autoPriceMarkup: 20,
-    autoCategory: true
+    autoCategory: true,
+    autoGenerateBackgrounds: false
   });
   const [csvProcessing, setCsvProcessing] = useState({
     isProcessing: false,
@@ -607,9 +616,79 @@ export function AdminDashboard({
         });
 
         try {
-          imageUrl = await fetchShopeeImage(product.offerLink || product.productLink);
+          let shopeeImageUrl = await fetchShopeeImage(product.offerLink || product.productLink);
+          
+          if (shopeeImageUrl) {
+            // 3.5️⃣ REMOVE BACKGROUND & REPLACE WITH NEW COLOR / AUTO-GENERATE BACKGROUND
+            setCsvProcessing({
+              isProcessing: true,
+              currentIndex: i + 1,
+              total: csvProducts.length,
+              message: `🎨 [${i + 1}/${csvProducts.length}] ${csvConfig.autoGenerateBackgrounds && hfToken ? 'Tạo nền mới...' : 'Xóa background & thay nền...'}`
+            });
+
+            try {
+              let processedImageDataUrl = '';
+
+              // Auto-generate background with HuggingFace if enabled
+              if (csvConfig.autoGenerateBackgrounds && hfToken) {
+                try {
+                  const bgPrompt = `professional ${product.itemName.toLowerCase().substring(0, 20)} product background, white studio, soft lighting, minimal, high resolution, clean, professional`;
+                  const hfResult = await generateBackgroundImageHF(bgPrompt, hfToken, `p_${i}`);
+                  
+                  // Convert blob to canvas and merge if needed
+                  const canvas = document.createElement('canvas');
+                  canvas.width = 512;
+                  canvas.height = 512;
+                  const ctx = canvas.getContext('2d')!;
+                  
+                  // Draw background
+                  const bgImg = new Image();
+                  bgImg.src = URL.createObjectURL(hfResult.imageBlob);
+                  await new Promise(resolve => bgImg.onload = resolve);
+                  ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
+                  
+                  processedImageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+                } catch (hfErr) {
+                  console.warn('HuggingFace generation failed, falling back:', hfErr);
+                  // Fallback to remove background + color replacement
+                  processedImageDataUrl = await processProductImageWithNewBackground(
+                    shopeeImageUrl,
+                    csvConfig.backgroundColor
+                  );
+                }
+              } else {
+                // Remove background and apply new background color
+                processedImageDataUrl = await processProductImageWithNewBackground(
+                  shopeeImageUrl,
+                  csvConfig.backgroundColor
+                );
+              }
+
+              // Convert data URL to File
+              const imageFile = dataUrlToFile(
+                processedImageDataUrl,
+                `product_${i}_${Date.now()}.jpg`
+              );
+
+              // Upload to Supabase
+              imageUrl = await uploadImageToSupabase(imageFile) || '';
+              
+            } catch (bgErr) {
+              console.warn('Lỗi xóa background:', bgErr);
+              // Fallback: upload ảnh gốc từ Shopee
+              try {
+                const originalFile = await fetch(shopeeImageUrl).then(r => r.blob());
+                imageUrl = await uploadImageToSupabase(
+                  new File([originalFile], `product_${i}_original.jpg`, { type: 'image/jpeg' })
+                ) || '';
+              } catch (fallbackErr) {
+                console.warn('Fallback upload failed:', fallbackErr);
+              }
+            }
+          }
         } catch (imgErr) {
-          console.warn('Lỗi tải ảnh:', imgErr);
+          console.warn('Lỗi tải ảnh từ Shopee:', imgErr);
           // Tiếp tục mà không có ảnh
         }
 
@@ -617,21 +696,32 @@ export function AdminDashboard({
         let aiDescription = product.itemName;
         const geminiKey = geminiKeys?.find((k: any) => k.isActive)?.key;
         
-        if (csvConfig.autoDescription && geminiKey) {
+        if (csvConfig.autoDescription && geminiKeys && geminiKeys.length > 0) {
           try {
             setCsvProcessing({
               isProcessing: true,
               currentIndex: i + 1,
               total: csvProducts.length,
-              message: `✍️ [${i + 1}/${csvProducts.length}] Sinh mô tả AI...`
+              message: `✍️ [${i + 1}/${csvProducts.length}] Sinh mô tả AI (thử ${geminiKeys.length} key)...`
             });
 
+            // Extract all valid keys
+            const validKeys = geminiKeys.filter((k: any) => k.key && k.key.trim()).map((k: any) => k.key.trim());
+
             const aiContent = await generateProductContent({
-              apiKey: geminiKey,
+              apiKeys: validKeys,
               productName: product.itemName,
               categoryId: storeCategory.id,
               extraInfo: `Gian hàng: ${product.shopName}, Bán: ${product.sales}, Hoa hồng: ${product.commissionRate}`,
-              price: parsePrice(product.price)
+              price: parsePrice(product.price),
+              onProgress: (msg: string) => {
+                setCsvProcessing({
+                  isProcessing: true,
+                  currentIndex: i + 1,
+                  total: csvProducts.length,
+                  message: `✍️ [${i + 1}/${csvProducts.length}] ${msg}`
+                });
+              }
             });
 
             aiDescription = aiContent.description || aiDescription;
@@ -3064,14 +3154,27 @@ export function AdminDashboard({
                 <label className="block text-xs font-bold text-gray-700 mb-1 flex justify-between">
                   <span>Địa chỉ URL của ảnh minh họa *</span>
                 </label>
-                <input 
-                  type="text" 
-                  placeholder="https://images.unsplash.com/photo-..." 
-                  className="w-full border border-gray-300 rounded-sm px-3 py-2 text-xs focus:outline-none focus:border-shopee-orange"
-                  value={image}
-                  onChange={e => setImage(e.target.value)}
-                  required
-                />
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    placeholder="https://images.unsplash.com/photo-..." 
+                    className="flex-1 border border-gray-300 rounded-sm px-3 py-2 text-xs focus:outline-none focus:border-shopee-orange"
+                    value={image}
+                    onChange={e => setImage(e.target.value)}
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUploadingProductId('new-product-' + Date.now());
+                      setUploadingProductName(title || 'Sản phẩm mới');
+                      setShowImageUploadModal(true);
+                    }}
+                    className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-3 rounded-sm text-xs transition-colors whitespace-nowrap"
+                  >
+                    📤 Upload
+                  </button>
+                </div>
                 
                 {/* Image Quick Presets */}
                 <div className="mt-2">
@@ -5246,6 +5349,104 @@ export function AdminDashboard({
 
       {adminTab === 'auto_publish' && (
         <div className="space-y-6 max-w-5xl mx-auto">
+          {/* HuggingFace API Token Configuration */}
+          <div className="bg-gradient-to-br from-purple-50 to-indigo-50 p-6 rounded-xl border-2 border-purple-300 shadow-lg">
+            <h2 className="text-2xl font-black text-purple-900 mb-4 flex items-center gap-2">
+              🤖 HuggingFace API Token (Tạo Ảnh Nền)
+            </h2>
+            
+            <div className="bg-white p-4 rounded-lg border border-purple-200 space-y-3">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">API Token:</label>
+                <input
+                  type="password"
+                  value={hfToken}
+                  onChange={(e) => {
+                    setHfToken(e.target.value);
+                    if (e.target.value.trim()) {
+                      localStorage.setItem('huggingface_token', e.target.value.trim());
+                    }
+                  }}
+                  onBlur={(e) => {
+                    if (e.target.value.trim()) {
+                      localStorage.setItem('huggingface_token', e.target.value.trim());
+                    }
+                  }}
+                  placeholder="hf_xxxxxxxxxxxxx (từ https://huggingface.co/settings/tokens)"
+                  className="w-full border-2 border-purple-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-purple-600 font-mono"
+                />
+                <p className="text-xs text-gray-600 mt-2">
+                  📌 <strong>Lấy token free:</strong> Vào <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">huggingface.co/settings/tokens</a> → Tạo token mới → Copy token → Dán vào đây
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={async () => {
+                    if (!hfToken.trim()) {
+                      setErrorMsg('❌ Vui lòng nhập HuggingFace token trước!');
+                      return;
+                    }
+
+                    try {
+                      setSuccessMsg('🔄 Đang kiểm tra token...');
+                      const isValid = await testHuggingFaceToken(hfToken);
+                      
+                      if (isValid) {
+                        localStorage.setItem('huggingface_token', hfToken);
+                        setSuccessMsg('✅ Token HuggingFace hợp lệ! Đã lưu.');
+                      } else {
+                        setErrorMsg('❌ Token không hợp lệ. Vui lòng kiểm tra lại!');
+                      }
+                    } catch (error: any) {
+                      setErrorMsg(`❌ Lỗi: ${error.message}`);
+                    }
+                  }}
+                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+                >
+                  ✅ Kiểm Tra & Lưu Token
+                </button>
+
+                <button
+                  onClick={async () => {
+                    if (!hfToken.trim()) {
+                      setErrorMsg('❌ Vui lòng nhập token trước!');
+                      return;
+                    }
+
+                    try {
+                      setSuccessMsg('🎨 Đang tạo ảnh nền mẫu...');
+                      const result = await generateBackgroundImageHF(
+                        'professional product background, white studio, soft lighting, minimal, high resolution',
+                        hfToken,
+                        'test_' + Date.now()
+                      );
+
+                      // Show preview
+                      const url = URL.createObjectURL(result.imageBlob);
+                      window.open(url, '_blank');
+                      
+                      setSuccessMsg('✅ Ảnh nền được tạo thành công! Kiểm tra popup mới.');
+                    } catch (error: any) {
+                      setErrorMsg(`❌ Lỗi tạo ảnh: ${error.message}`);
+                    }
+                  }}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+                >
+                  🎨 Thử Tạo Ảnh Mẫu
+                </button>
+              </div>
+
+              {hfToken && (
+                <div className="bg-purple-100 border border-purple-300 rounded-lg p-3">
+                  <p className="text-xs text-purple-800">
+                    ✅ <strong>Token đã lưu!</strong> Giờ bạn có thể tải ảnh lên cho từng sản phẩm và tự động tạo nền mới.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Shopee Affiliate Commission Explanation */}
           <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-6 rounded-xl border-2 border-amber-300 shadow-lg">
             <h2 className="text-2xl font-black text-amber-900 mb-4 flex items-center gap-2">
@@ -5423,6 +5624,18 @@ export function AdminDashboard({
                   />
                   <span className="text-sm text-gray-700 group-hover:text-cyan-700">
                     🏷️ Tự động phân loại danh mục
+                  </span>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <input
+                    type="checkbox"
+                    checked={csvConfig.autoGenerateBackgrounds}
+                    onChange={(e) => setCsvConfig({ ...csvConfig, autoGenerateBackgrounds: e.target.checked })}
+                    className="w-4 h-4 rounded accent-purple-500"
+                    disabled={!hfToken}
+                  />
+                  <span className={`text-sm ${hfToken ? 'text-gray-700 group-hover:text-purple-700' : 'text-gray-400'}`}>
+                    🎨 Tự động tạo nền ảnh (cần HuggingFace Token)
                   </span>
                 </label>
               </div>
@@ -6426,6 +6639,22 @@ CREATE POLICY "Allow ALL" ON public.affiliate_products FOR ALL USING (true) WITH
             )}
           </motion.div>
         </div>
+      )}
+
+      {/* Image Upload Modal */}
+      {showImageUploadModal && (
+        <ImageUploadModal
+          productId={uploadingProductId}
+          productName={uploadingProductName}
+          isOpen={showImageUploadModal}
+          onClose={() => setShowImageUploadModal(false)}
+          onSuccess={(imageUrl) => {
+            setShowImageUploadModal(false);
+            setImage(imageUrl);
+            setSuccessMsg(`✅ Ảnh đã tải lên thành công! URL: ${imageUrl}`);
+          }}
+          supabase={supabase}
+        />
       )}
 
     </div>

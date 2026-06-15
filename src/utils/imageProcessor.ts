@@ -146,6 +146,157 @@ export const resizeImage = async (
 };
 
 /**
+ * Xóa background ảnh sản phẩm bằng Remove.bg API hoặc Canvas detection
+ * Giữ nguyên sản phẩm, chỉ xóa background
+ */
+export const removeBackground = async (
+  imageUrl: string,
+  removeBackgroundApiKey?: string
+): Promise<string> => {
+  // Nếu có API key, dùng Remove.bg
+  if (removeBackgroundApiKey) {
+    try {
+      const formData = new FormData();
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      formData.append('image_file', blob);
+      formData.append('format', 'auto');
+
+      const removeResponse = await fetch('https://api.remove.bg/v1.0/removebg', {
+        method: 'POST',
+        headers: {
+          'X-API-Key': removeBackgroundApiKey
+        },
+        body: formData
+      });
+
+      if (removeResponse.ok) {
+        const blob = await removeResponse.blob();
+        return URL.createObjectURL(blob);
+      }
+    } catch (error) {
+      console.warn('Remove.bg API failed, falling back to Canvas detection:', error);
+    }
+  }
+
+  // Fallback: Canvas color threshold detection
+  return new Promise((resolve, reject) => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    if (!ctx) {
+      reject(new Error('Canvas context not available'));
+      return;
+    }
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    img.onload = () => {
+      canvas.width = img.width;
+      canvas.height = img.height;
+
+      ctx.drawImage(img, 0, 0);
+
+      // Get image data
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+
+      // Detect background color from corner (usually background)
+      const bgColor = {
+        r: data[0],
+        g: data[1],
+        b: data[2],
+        a: data[3]
+      };
+
+      // Threshold for detecting "same" color (adjust if needed)
+      const threshold = 30;
+
+      // Convert similar colors to transparent
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+
+        // If color is similar to background color, make it transparent
+        if (
+          Math.abs(r - bgColor.r) < threshold &&
+          Math.abs(g - bgColor.g) < threshold &&
+          Math.abs(b - bgColor.b) < threshold
+        ) {
+          data[i + 3] = 0; // Set alpha to 0 (transparent)
+        }
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+
+      const resultUrl = canvas.toDataURL('image/png');
+      resolve(resultUrl);
+    };
+
+    img.onerror = () => {
+      reject(new Error('Failed to load image'));
+    };
+
+    img.src = imageUrl;
+  });
+};
+
+/**
+ * Xóa background và thay nền mới (giữ nguyên sản phẩm)
+ */
+export const processProductImageWithNewBackground = async (
+  imageUrl: string,
+  backgroundColor: string = '#FFFFFF',
+  removeBackgroundApiKey?: string
+): Promise<string> => {
+  try {
+    // 1️⃣ Remove background
+    const transparentImageUrl = await removeBackground(imageUrl, removeBackgroundApiKey);
+
+    // 2️⃣ Create new canvas with background color + transparent product
+    return new Promise((resolve, reject) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      if (!ctx) {
+        reject(new Error('Canvas context not available'));
+        return;
+      }
+
+      const productImg = new Image();
+      productImg.crossOrigin = 'anonymous';
+
+      productImg.onload = () => {
+        canvas.width = productImg.width;
+        canvas.height = productImg.height;
+
+        // Draw background color
+        ctx.fillStyle = backgroundColor;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw product image on top (with transparency)
+        ctx.drawImage(productImg, 0, 0);
+
+        const resultUrl = canvas.toDataURL('image/jpeg', 0.95);
+        resolve(resultUrl);
+      };
+
+      productImg.onerror = () => {
+        reject(new Error('Failed to load product image'));
+      };
+
+      productImg.src = transparentImageUrl;
+    });
+  } catch (error) {
+    console.error('Error processing product image:', error);
+    // Fallback: return original image
+    return imageUrl;
+  }
+};
+
+/**
  * Thêm gradient background
  */
 export const addGradientBackground = async (
@@ -226,6 +377,21 @@ export const urlToFile = async (url: string, filename: string): Promise<File> =>
   const response = await fetch(url);
   const blob = await response.blob();
   return new File([blob], filename, { type: blob.type });
+};
+
+/**
+ * Convert data URL (base64) thành File object
+ */
+export const dataUrlToFile = (dataUrl: string, filename: string): File => {
+  const arr = dataUrl.split(',');
+  const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new File([u8arr], filename, { type: mime });
 };
 
 /**
