@@ -36,21 +36,21 @@ Sản phẩm: "${params.productName}"
 Thông tin thêm: "${params.extraInfo || ''}"
 Giá: ${params.price || 0} VNĐ
 
-YÊU CẦU TRẢ VỀ DƯỚI DẠNG JSON HỢP LỆ THEO CẤU TRÚC SAU (không chứa markdown markdown block \`\`\`json):
+YÊU CẦU TRẢ VỀ DƯỚI DẠNG JSON HỢP LỆ THEO CẤU TRÚC SAU (không chứa markdown block):
 {
   "title": "Tiêu đề hấp dẫn ngắn gọn (kèm emoji)",
-  "description": "Bài mô tả sản phẩm hấp dẫn, chèn emoji, chuẩn SEO, tập trung vào lợi ích, kêu gọi mua hàng. Khoảng 150-200 từ. Sử dụng thông tin được cung cấp.",
+  "description": "Bài mô tả sản phẩm cực kỳ chi tiết, sinh động, chèn emoji, chuẩn SEO, tập trung sâu vào lợi ích, công dụng và kêu gọi mua hàng. Khoảng 300-500 từ. TUYỆT ĐỐI KHÔNG NHẮC ĐẾN TỶ LỆ HOA HỒNG hay thông tin nội bộ của Shopee.",
   "price": ${params.price || 0},
   "originalPrice": ${params.originalPrice || 0},
   "imageKeyword": "Câu lệnh tiếng Anh chi tiết để vẽ ảnh nền mới cho sản phẩm này. Hãy tưởng tượng bối cảnh đẹp và phù hợp (ví dụ: đang ở bãi biển, con đường làng, quán cafe đẹp, không gian sang trọng). BẮT BUỘC giữ nguyên sản phẩm, người mẫu. Câu lệnh phải bắt đầu bằng: '${params.productName}, high-resolution product photo, placed on/in [new background description], realistic, masterpiece, highly detailed, keep original product intact, no extra text'"
 }`;
 
-  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=' + params.apiKey, {
+  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=' + params.apiKey, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      // Bỏ qua generationConfig response_mime_type cho gemini-pro vì model này có thể không hỗ trợ JSON schema ngặt nghèo
+      generationConfig: { response_mime_type: "application/json" }
     }),
   });
 

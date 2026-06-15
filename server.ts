@@ -75,23 +75,49 @@ app.get("/api/auto-publish/stream", async (req, res) => {
 
   try {
     const limit = Number(req.query.limit) || 20; // default 20 products per run
-    
-    sendEvent({ type: 'log', message: 'Bắt đầu cào dữ liệu từ Shopee...' });
-    const rawProducts = await fetchShopeeProducts();
-    let filtered = rawProducts.filter(p => (p.salesCount || 0) > 1000 && (p.commissionRate || 0) >= 10);
-    if (filtered.length === 0) {
-      sendEvent({ type: 'log', message: '⚠️ Không có sản phẩm thỏa mãn tiêu chí, sẽ dùng toàn bộ dữ liệu thu thập được.' });
-      filtered = rawProducts.slice(0, limit);
-    } else {
-      filtered = filtered.slice(0, limit);
-    }
-    const toProcess = filtered;
-
-    sendEvent({ type: 'log', message: `Đã tìm thấy ${toProcess.length} sản phẩm thỏa mãn điều kiện (>1000 lượt bán, hoa hồng >=12%).` });
-
     const qUrl = (req.query.url as string || '').trim();
     const qKey = (req.query.key as string || '').trim();
     const geminiKey = (req.query.geminiKey as string || '').trim();
+    const qLinksStr = (req.query.links as string || '').trim();
+    
+    sendEvent({ type: 'log', message: 'Bắt đầu cào dữ liệu từ Shopee...' });
+    
+    let toProcess: any[] = [];
+    
+    if (qLinksStr) {
+      const urls = qLinksStr.split('\n').map(s => s.trim()).filter(Boolean);
+      sendEvent({ type: 'log', message: `Phát hiện ${urls.length} link do người dùng cung cấp. Đang tiến hành cào dữ liệu từng link...` });
+      
+      const { fetchShopeeProductFromUrl } = await import('./src/utils/shopeeScraper');
+      for (const url of urls) {
+        const prod = await fetchShopeeProductFromUrl(url);
+        if (prod) {
+          toProcess.push(prod);
+        } else {
+          sendEvent({ type: 'log', message: `⚠️ Không thể cào dữ liệu từ link: ${url}` });
+        }
+      }
+      
+      if (toProcess.length > limit) {
+        toProcess = toProcess.slice(0, limit);
+      }
+    } else {
+      const rawProducts = await fetchShopeeProducts();
+      let filtered = rawProducts.filter(p => (p.salesCount || 0) > 1000 && (p.commissionRate || 0) >= 10);
+      if (filtered.length === 0) {
+        sendEvent({ type: 'log', message: '⚠️ Không có sản phẩm thỏa mãn tiêu chí, sẽ dùng toàn bộ dữ liệu thu thập được.' });
+        filtered = rawProducts.slice(0, limit);
+      } else {
+        filtered = filtered.slice(0, limit);
+      }
+      toProcess = filtered;
+      sendEvent({ type: 'log', message: `Đã tìm thấy ${toProcess.length} sản phẩm thỏa mãn điều kiện (>1000 lượt bán, hoa hồng >=10%).` });
+    }
+
+    if (toProcess.length === 0) {
+      sendEvent({ type: 'error', message: 'Không có sản phẩm nào để xử lý.' });
+      return res.end();
+    }
     
     const finalUrl = qUrl || globalSupabaseConfig.url || '';
     const finalKey = qKey || globalSupabaseConfig.key || '';
@@ -178,6 +204,26 @@ app.get("/api/auto-publish/stream", async (req, res) => {
              }
              sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Dùng nội dung mặc định do lỗi AI.` });
           }
+        }
+        
+        // --- XỬ LÝ ẢNH CHỐNG LỖI 403 (HOTLINKING) ---
+        // Nếu imageUrl vẫn là link Shopee gốc (nghĩa là AI ảnh không chạy hoặc lỗi), tải lên Supabase để chống 403
+        if (imageUrl && imageUrl.includes('shopee.vn') || imageUrl.includes('susercontent.com')) {
+           try {
+             sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tải ảnh gốc từ Shopee lên máy chủ để chống lỗi hiển thị...` });
+             const imgFetch = await fetch(imageUrl);
+             if (imgFetch.ok) {
+               const imgBuffer = await imgFetch.arrayBuffer();
+               const fileName = `shopee_${Date.now()}_${Math.random().toString(36).substr(2, 6)}.jpg`;
+               const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, imgBuffer, { contentType: 'image/jpeg' });
+               if (!uploadError) {
+                 const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
+                 imageUrl = data.publicUrl || imageUrl;
+               }
+             }
+           } catch (dlErr) {
+             console.log('Lỗi tải ảnh gốc Shopee:', dlErr);
+           }
         }
 
         // Lưu vào bảng affiliate_products (hiển thị trên trang chủ)

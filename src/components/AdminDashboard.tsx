@@ -53,6 +53,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSlidesForTopic } from '../utils/giftSlidesData';
+import { readCSVFile, parseCSV, parsePrice } from '../utils/csvProcessor';
+import { replaceBackground, PRESET_BACKGROUNDS } from '../utils/imageProcessor';
 
 // compressImage is now imported from ../utils
 
@@ -468,6 +470,147 @@ export function AdminDashboard({
   const [apLogs, setApLogs] = useState<string[]>([]);
   const [apStatus, setApStatus] = useState<'idle'|'running'|'done'|'error'>('idle');
   const [apProgress, setApProgress] = useState({ current: 0, total: 0 });
+  const [apLinks, setApLinks] = useState('');
+
+  // CSV Import States
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvProducts, setCsvProducts] = useState<any[]>([]);
+  const [csvConfig, setCsvConfig] = useState({
+    backgroundColor: PRESET_BACKGROUNDS.WHITE,
+    autoDescription: true,
+    autoPriceMarkup: 20,
+    autoCategory: true
+  });
+  const [csvProcessing, setCsvProcessing] = useState({
+    isProcessing: false,
+    currentIndex: 0,
+    total: 0,
+    message: ''
+  });
+
+  // CSV Handlers
+  const handleCSVFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setCsvProcessing({ isProcessing: true, currentIndex: 0, total: 0, message: 'Đang đọc file CSV...' });
+      const csvContent = await readCSVFile(file);
+      const products = parseCSV(csvContent);
+      
+      setCsvFile(file);
+      setCsvProducts(products);
+      setSuccessMsg(`✅ Đã tải ${products.length} sản phẩm từ CSV!`);
+      setCsvProcessing({ isProcessing: false, currentIndex: 0, total: products.length, message: `Sẵn sàng xử lý ${products.length} sản phẩm` });
+    } catch (error) {
+      setErrorMsg(`❌ Lỗi đọc file: ${error}`);
+      setCsvProcessing({ isProcessing: false, currentIndex: 0, total: 0, message: 'Lỗi' });
+    }
+  };
+
+  const handleAutoFillFromCSV = async (product: any) => {
+    try {
+      setCsvProcessing({
+        isProcessing: true,
+        currentIndex: 0,
+        total: 0,
+        message: `Đang tải: ${product.itemName.substring(0, 40)}...`
+      });
+
+      const basePrice = parsePrice(product.price);
+      const markupPrice = Math.round(basePrice * (1 + csvConfig.autoPriceMarkup / 100));
+
+      setTitle(product.itemName);
+      setPrice(markupPrice);
+      setOriginalPrice(basePrice);
+      setAffiliateLink(product.offerLink || product.productLink);
+      
+      if (csvConfig.autoCategory) {
+        const suggestedCat = autoCategorize(product.itemName);
+        setCategoryId(suggestedCat);
+      }
+      
+      if (csvConfig.autoDescription) {
+        const autoDesc = `${product.itemName}. Chất lượng cao, bán chạy hàng ngày. Liên hệ để được tư vấn thêm.`;
+        setDescription(autoDesc);
+      }
+
+      setSuccessMsg(`✅ Đã tải sản phẩm: ${product.itemName}`);
+      setCsvProcessing({ isProcessing: false, currentIndex: 0, total: 0, message: '' });
+    } catch (error) {
+      setErrorMsg(`❌ Lỗi: ${error}`);
+      setCsvProcessing({ isProcessing: false, currentIndex: 0, total: 0, message: 'Lỗi' });
+    }
+  };
+
+  const handleBatchAutoPublishCSV = async () => {
+    if (csvProducts.length === 0) {
+      alert('Vui lòng tải file CSV trước!');
+      return;
+    }
+
+    if (!window.confirm(`Bạn sắp tự động đăng ${csvProducts.length} sản phẩm từ CSV. Tiếp tục?`)) return;
+
+    setCsvProcessing({
+      isProcessing: true,
+      currentIndex: 0,
+      total: csvProducts.length,
+      message: 'Bắt đầu xử lý...'
+    });
+
+    let successCount = 0;
+
+    for (let i = 0; i < csvProducts.length; i++) {
+      const product = csvProducts[i];
+      
+      try {
+        setCsvProcessing({
+          isProcessing: true,
+          currentIndex: i + 1,
+          total: csvProducts.length,
+          message: `[${i + 1}/${csvProducts.length}] ${product.itemName.substring(0, 30)}...`
+        });
+
+        const basePrice = parsePrice(product.price);
+        const markupPrice = Math.round(basePrice * (1 + csvConfig.autoPriceMarkup / 100));
+
+        const newProduct: Product = {
+          id: 'p_' + Date.now() + '_' + i,
+          title: product.itemName,
+          price: markupPrice,
+          originalPrice: basePrice,
+          discountPercent: Math.round(((basePrice - markupPrice) / basePrice) * 100),
+          image: '',
+          categoryId: csvConfig.autoCategory ? autoCategorize(product.itemName) : '1',
+          affiliateLink: product.offerLink || product.productLink,
+          platform: 'shopee',
+          soldCount: parseInt(product.sales.replace(/[^\d]/g, '')) || 0,
+          description: csvConfig.autoDescription
+            ? `${product.itemName}. Sản phẩm chất lượng cao từ Shopee.`
+            : product.itemName,
+          isSuggested: true,
+          isDirectProduct: false,
+          videoUrl: '',
+          postDate: new Date().toLocaleDateString('vi-VN')
+        };
+
+        onAddProduct(newProduct);
+        successCount++;
+        await new Promise(resolve => setTimeout(resolve, 300));
+      } catch (error) {
+        console.error(`Lỗi xử lý sản phẩm ${i}:`, error);
+      }
+    }
+
+    setCsvProcessing({
+      isProcessing: false,
+      currentIndex: successCount,
+      total: csvProducts.length,
+      message: `✅ Hoàn thành! Đã tạo ${successCount}/${csvProducts.length} sản phẩm`
+    });
+
+    setSuccessMsg(`✅ Đã tạo ${successCount} sản phẩm từ CSV!`);
+  };
 
   const startAutoPublish = async () => {
     const url = localStorage.getItem('supabase_url') || '';
@@ -488,7 +631,10 @@ export function AdminDashboard({
       const activeGeminiKey = geminiKeys?.find((k: any) => k.isActive) || geminiKeys?.[0];
       const geminiKeyStr = activeGeminiKey ? activeGeminiKey.key : '';
 
-      const source = new EventSource(`/api/auto-publish/stream?limit=${apCount}&url=${encodeURIComponent(url)}&key=${encodeURIComponent(key)}&geminiKey=${encodeURIComponent(geminiKeyStr)}`);
+      // Mã hoá danh sách link
+      const linksParam = encodeURIComponent(apLinks.trim());
+
+      const source = new EventSource(`/api/auto-publish/stream?limit=${apCount}&url=${encodeURIComponent(url)}&key=${encodeURIComponent(key)}&geminiKey=${encodeURIComponent(geminiKeyStr)}&links=${linksParam}`);
       
       source.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -5022,6 +5168,211 @@ export function AdminDashboard({
 
       {adminTab === 'auto_publish' && (
         <div className="space-y-6 max-w-5xl mx-auto">
+          {/* CSV Auto-Import Section */}
+          <div className="bg-gradient-to-br from-cyan-50 to-blue-50 p-6 rounded-xl border-2 border-cyan-300 shadow-lg">
+            <h2 className="text-2xl font-black text-cyan-900 mb-2 flex items-center gap-2">
+              📊 Auto-Import từ CSV
+            </h2>
+            <p className="text-cyan-700 mb-6">
+              Tải file CSV → Tự động điền thông tin sản phẩm → Đăng bài hàng loạt
+            </p>
+
+            <div className="space-y-6">
+              {/* File Upload */}
+              <div className="bg-white p-4 rounded-lg border border-cyan-200">
+                <label className="block text-sm font-bold text-gray-700 mb-3">
+                  📁 Chọn File CSV
+                </label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleCSVFileSelect}
+                  className="w-full border-2 border-dashed border-cyan-300 rounded-lg px-4 py-3 text-sm hover:border-cyan-500 cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-cyan-100 file:text-cyan-700 hover:file:bg-cyan-200"
+                  disabled={csvProcessing.isProcessing}
+                />
+                <p className="text-xs text-gray-500 mt-2">
+                  ✅ Format: CSV từ Shopee Affiliate (Product Link, Item Name, Price, Sales...)
+                </p>
+              </div>
+
+              {/* Product List */}
+              {csvProducts.length > 0 && (
+                <div className="bg-white rounded-lg p-4 border border-cyan-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-bold text-gray-700">
+                      📦 Danh Sách ({csvProducts.length} sản phẩm)
+                    </p>
+                    <span className="text-xs bg-cyan-100 text-cyan-700 px-2 py-1 rounded-full">
+                      {csvProcessing.currentIndex}/{csvProcessing.total}
+                    </span>
+                  </div>
+                  
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {csvProducts.slice(0, 10).map((product, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between bg-gradient-to-r from-gray-50 to-cyan-50 p-3 rounded border border-cyan-100 hover:border-cyan-300 hover:shadow-sm transition-all group cursor-pointer"
+                        onClick={() => handleAutoFillFromCSV(product)}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-gray-800 truncate">
+                            {idx + 1}. {product.itemName.substring(0, 50)}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {product.shopName} • {product.sales}
+                          </p>
+                        </div>
+                        <div className="text-right ml-3">
+                          <p className="text-xs font-bold text-cyan-600">
+                            {product.price}
+                          </p>
+                          <p className="text-[10px] text-gray-500">
+                            {product.commissionRate}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="ml-2 px-3 py-1.5 bg-cyan-500 hover:bg-cyan-600 text-white rounded text-xs font-bold opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAutoFillFromCSV(product);
+                          }}
+                        >
+                          Load 📝
+                        </button>
+                      </div>
+                    ))}
+                    {csvProducts.length > 10 && (
+                      <p className="text-xs text-gray-500 text-center py-2">
+                        +{csvProducts.length - 10} sản phẩm khác...
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Configuration */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    🎨 Background
+                  </label>
+                  <select
+                    value={csvConfig.backgroundColor}
+                    onChange={(e) => setCsvConfig({ ...csvConfig, backgroundColor: e.target.value })}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-cyan-500"
+                  >
+                    <option value="#FFFFFF">⚪ Trắng</option>
+                    <option value="#FFE5E5">🔴 Hồng nhạt</option>
+                    <option value="#E5F2FF">🔵 Xanh nhạt</option>
+                    <option value="#FFFBE5">🟡 Vàng nhạt</option>
+                    <option value="#E5F9E5">🟢 Xanh lá nhạt</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    💰 Tăng Giá: {csvConfig.autoPriceMarkup}%
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="50"
+                    value={csvConfig.autoPriceMarkup}
+                    onChange={(e) => setCsvConfig({ ...csvConfig, autoPriceMarkup: parseInt(e.target.value) })}
+                    className="w-full"
+                  />
+                </div>
+              </div>
+
+              {/* Auto Options */}
+              <div className="space-y-2 bg-white p-3 rounded-lg border border-cyan-200">
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <input
+                    type="checkbox"
+                    checked={csvConfig.autoDescription}
+                    onChange={(e) => setCsvConfig({ ...csvConfig, autoDescription: e.target.checked })}
+                    className="w-4 h-4 rounded accent-cyan-500"
+                  />
+                  <span className="text-sm text-gray-700 group-hover:text-cyan-700">
+                    ✍️ Tự động sinh mô tả từ tên sản phẩm
+                  </span>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <input
+                    type="checkbox"
+                    checked={csvConfig.autoCategory}
+                    onChange={(e) => setCsvConfig({ ...csvConfig, autoCategory: e.target.checked })}
+                    className="w-4 h-4 rounded accent-cyan-500"
+                  />
+                  <span className="text-sm text-gray-700 group-hover:text-cyan-700">
+                    🏷️ Tự động phân loại danh mục
+                  </span>
+                </label>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => csvProducts.length > 0 && handleAutoFillFromCSV(csvProducts[0])}
+                  disabled={csvProducts.length === 0 || csvProcessing.isProcessing}
+                  className="flex-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm"
+                >
+                  <Upload className="w-4 h-4" />
+                  Load Sản Phẩm Đầu Tiên
+                </button>
+                
+                <button
+                  type="button"
+                  onClick={handleBatchAutoPublishCSV}
+                  disabled={csvProducts.length === 0 || csvProcessing.isProcessing}
+                  className="flex-1 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-all shadow-md flex items-center justify-center gap-2 text-sm"
+                >
+                  {csvProcessing.isProcessing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Đang Xử Lý...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-4 h-4" />
+                      Batch Import Tất Cả
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Progress */}
+              {csvProcessing.isProcessing && (
+                <div className="bg-blue-50 border border-blue-300 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-bold text-blue-900">⏳ {csvProcessing.message}</p>
+                    <span className="text-xs text-blue-700">
+                      {csvProcessing.currentIndex}/{csvProcessing.total}
+                    </span>
+                  </div>
+                  <div className="w-full bg-blue-200 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-blue-600 h-2 rounded-full transition-all"
+                      style={{
+                        width: csvProcessing.total > 0
+                          ? `${(csvProcessing.currentIndex / csvProcessing.total) * 100}%`
+                          : '0%'
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {csvProcessing.message && !csvProcessing.isProcessing && (
+                <div className="bg-green-50 border border-green-300 rounded-lg p-3 text-xs text-green-700 font-semibold">
+                  ✅ {csvProcessing.message}
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8">
             <h2 className="text-2xl font-black text-gray-900 mb-2">⚡ Tự Động Đăng Bài (Auto Publish)</h2>
             <p className="text-gray-600 mb-8">
@@ -5029,37 +5380,49 @@ export function AdminDashboard({
             </p>
 
             <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 space-y-6">
-              <div className="flex items-center gap-4">
-                <div className="w-1/2">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Số lượng sản phẩm mỗi lần chạy</label>
-                  <input 
-                    type="number" 
-                    min="1" max="100"
-                    className="w-full border-gray-300 rounded-lg shadow-sm focus:border-shopee-orange focus:ring-shopee-orange p-3"
-                    value={apCount}
-                    onChange={e => setApCount(Number(e.target.value))}
+              <div className="flex flex-col gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Danh sách Link Tiếp Thị (Tuỳ chọn)</label>
+                  <textarea 
+                    className="w-full border-gray-300 rounded-lg shadow-sm focus:border-shopee-orange focus:ring-shopee-orange p-3 min-h-[100px] text-xs"
+                    placeholder="Dán các link tiếp thị rút gọn (vd: https://s.shopee.vn/xxx) vào đây, mỗi dòng 1 link. Nếu bỏ trống, hệ thống sẽ tự tìm sản phẩm ngẫu nhiên."
+                    value={apLinks}
+                    onChange={e => setApLinks(e.target.value)}
                     disabled={apStatus === 'running'}
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Nên chạy 10-20 sản phẩm để tránh quá tải AI hoặc bị Shopee chặn.</p>
+                  ></textarea>
                 </div>
-                <div className="w-1/2 flex items-end">
-                  <button
-                    onClick={startAutoPublish}
-                    disabled={apStatus === 'running'}
-                    className="w-full bg-gradient-to-r from-shopee-orange to-[#ff6b6b] text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                  >
-                    {apStatus === 'running' ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        Đang Chạy Auto Publish...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-5 h-5" />
-                        Run Auto Publish
-                      </>
-                    )}
-                  </button>
+                <div className="flex gap-4">
+                  <div className="w-1/2">
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Số lượng sản phẩm mỗi lần chạy</label>
+                    <input 
+                      type="number" 
+                      min="1" max="100"
+                      className="w-full border-gray-300 rounded-lg shadow-sm focus:border-shopee-orange focus:ring-shopee-orange p-3"
+                      value={apCount}
+                      onChange={e => setApCount(Number(e.target.value))}
+                      disabled={apStatus === 'running' || apLinks.trim().length > 0}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Nên chạy 10-20 sản phẩm. Nếu bạn đã nhập link ở trên, hệ thống sẽ chạy theo số lượng link.</p>
+                  </div>
+                  <div className="w-1/2 flex items-end">
+                    <button
+                      onClick={startAutoPublish}
+                      disabled={apStatus === 'running'}
+                      className="w-full bg-gradient-to-r from-shopee-orange to-[#ff6b6b] text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {apStatus === 'running' ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          Đang Chạy Auto Publish...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-5 h-5" />
+                          Run Auto Publish
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
 

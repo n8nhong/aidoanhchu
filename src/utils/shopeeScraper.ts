@@ -283,3 +283,81 @@ export async function fetchShopeeProducts(): Promise<ShopeeProduct[]> {
 
   return allProducts;
 }
+
+/**
+ * Trích xuất thông tin sản phẩm từ 1 link (rút gọn hoặc link gốc)
+ */
+export async function fetchShopeeProductFromUrl(inputUrl: string): Promise<ShopeeProduct | null> {
+  try {
+    let finalUrl = inputUrl;
+    
+    // Nếu là link rút gọn, làm một request HEAD để lấy URL thật
+    if (inputUrl.includes('s.shopee.vn') || inputUrl.includes('shp.ee')) {
+      const redirectRes = await fetch(inputUrl, { method: 'GET', redirect: 'follow', signal: AbortSignal.timeout(5000) }).catch(() => null);
+      if (redirectRes) {
+        finalUrl = redirectRes.url;
+      }
+    }
+
+    // Trích xuất shopid và itemid từ URL
+    // Dạng 1: -i.1234.5678
+    // Dạng 2: /product/1234/5678
+    let shopId = '';
+    let itemId = '';
+    
+    const match1 = finalUrl.match(/-i\.(\d+)\.(\d+)/);
+    if (match1) {
+      shopId = match1[1];
+      itemId = match1[2];
+    } else {
+      const match2 = finalUrl.match(/\/product\/(\d+)\/(\d+)/);
+      if (match2) {
+        shopId = match2[1];
+        itemId = match2[2];
+      }
+    }
+
+    if (!shopId || !itemId) {
+      console.log('Không thể trích xuất ID từ URL:', finalUrl);
+      return null;
+    }
+
+    // Lấy thông tin từ API Shopee
+    const apiUrl = `https://shopee.vn/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`;
+    const res = await fetch(apiUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Referer': finalUrl,
+        'X-Shopee-Language': 'vi',
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      const itemData = json?.data;
+      if (itemData) {
+        const title = itemData.name || '';
+        const price = Math.round((itemData.price || 0) / 100000);
+        const salesCount = itemData.historical_sold || 0;
+        const imageHash = itemData.image || '';
+        const imageUrl = imageHash ? `https://down-vn.img.susercontent.com/file/${imageHash}` : '';
+        
+        return {
+          title,
+          link: inputUrl, // GIỮ NGUYÊN LINK GỐC CỦA NGƯỜI DÙNG
+          imageUrl,
+          price,
+          salesCount,
+          commissionRate: 15,
+          categoryId: String(itemData.catid || '1'),
+          extraInfo: `${salesCount} đã bán | ⭐ ${(itemData.item_rating?.rating_star || 0).toFixed(1)}`
+        };
+      }
+    }
+  } catch (e) {
+    console.error('Lỗi khi cào link shopee:', e);
+  }
+  return null;
+}
