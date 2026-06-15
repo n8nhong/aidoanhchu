@@ -5920,7 +5920,7 @@ ALTER TABLE public.affiliate_products ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow ALL" ON public.affiliate_products FOR ALL USING (true) WITH CHECK (true);`;
                   navigator.clipboard.writeText(sql);
                   alert('✅ Đã copy SQL tạo affiliate_products! Dán vào SQL Editor rồi bấm Run.');
-                }}}
+                }}
                 className="absolute top-2 right-12 bg-orange-700 hover:bg-orange-600 text-white px-2 py-0.5 rounded text-[9px] cursor-pointer"
               >
                 📌 Copy Affiliate SQL
