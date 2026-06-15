@@ -470,6 +470,13 @@ export function AdminDashboard({
   const [apProgress, setApProgress] = useState({ current: 0, total: 0 });
 
   const startAutoPublish = async () => {
+    const url = localStorage.getItem('supabase_url') || '';
+    const key = localStorage.getItem('supabase_key') || '';
+    if (!url || !key) {
+      alert("Vui lòng thiết lập cấu hình Supabase trong tab Quản trị trước khi chạy Auto Publish!");
+      return;
+    }
+
     if (!window.confirm(`Bạn sắp bắt đầu Auto Publish ${apCount} sản phẩm. Quá trình này có thể mất vài phút. Tiếp tục?`)) return;
     
     setApStatus('running');
@@ -477,7 +484,7 @@ export function AdminDashboard({
     setApProgress({ current: 0, total: apCount });
 
     try {
-      const source = new EventSource(`/api/auto-publish/stream?limit=${apCount}`);
+      const source = new EventSource(`/api/auto-publish/stream?limit=${apCount}&url=${encodeURIComponent(url)}&key=${encodeURIComponent(key)}`);
       
       source.onmessage = (event) => {
         const data = JSON.parse(event.data);

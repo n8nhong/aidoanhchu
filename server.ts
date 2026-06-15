@@ -89,8 +89,14 @@ app.get("/api/auto-publish/stream", async (req, res) => {
 
     sendEvent({ type: 'log', message: `Đã tìm thấy ${toProcess.length} sản phẩm thỏa mãn điều kiện (>1000 lượt bán, hoa hồng >=12%).` });
 
-    if (globalSupabaseConfig.url) process.env.SUPABASE_URL = globalSupabaseConfig.url;
-    if (globalSupabaseConfig.key) process.env.SUPABASE_KEY = globalSupabaseConfig.key;
+    const qUrl = req.query.url as string;
+    const qKey = req.query.key as string;
+    
+    if (qUrl) process.env.SUPABASE_URL = qUrl;
+    else if (globalSupabaseConfig.url) process.env.SUPABASE_URL = globalSupabaseConfig.url;
+    
+    if (qKey) process.env.SUPABASE_KEY = qKey;
+    else if (globalSupabaseConfig.key) process.env.SUPABASE_KEY = globalSupabaseConfig.key;
 
     const supabase = getSupabase();
     if (!supabase) {
