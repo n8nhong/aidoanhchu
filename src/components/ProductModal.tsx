@@ -150,7 +150,7 @@ export function ProductModal({ product, onClose, onAddToCart, onlineProducts = [
                   <Info className="w-4 h-4 text-gray-500" />
                   Chi tiết sản phẩm
                 </h3>
-                <p className="text-sm text-gray-600 leading-relaxed bg-white text-justify whitespace-pre-line font-medium text-gray-700">
+                <p className="text-sm text-gray-600 leading-relaxed bg-white text-justify whitespace-pre-line font-medium text-gray-700 max-h-64 overflow-y-auto pr-2 scrollbar-thin">
                   {product.description || "Chưa có mô tả chi tiết cho sản phẩm này."}
                 </p>
               </div>

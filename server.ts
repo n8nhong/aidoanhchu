@@ -1,7 +1,8 @@
 import express from "express";
 import { fetchShopeeProducts } from "./src/utils/shopeeScraper";
 import { generateProductContent } from "./src/utils/geminiClient";
-import { generateBackgroundImage } from "./src/utils/stableDiffusion";
+import { generateBackgroundImage, dataUrlToBuffer } from "./src/utils/stableDiffusion";
+import { autoCategorize } from "./src/utils/autoCategorize";
 import { createClient } from "@supabase/supabase-js";
 import path from "path";
 import { createServer as createViteServer } from "vite";
@@ -139,11 +140,12 @@ app.get("/api/auto-publish/stream", async (req, res) => {
         sendEvent({ type: 'progress', current: i + 1, total: toProcess.length, message: `Đang xử lý: ${prod.title.substring(0, 40)}...` });
 
         let description = prod.extraInfo 
-          ? `${prod.extraInfo}. Đã bán ${prod.salesCount}+ đơn trên Shopee. Hoa hồng ${prod.commissionRate}%.`
-          : `Sản phẩm hot với ${prod.salesCount}+ lượt bán trên Shopee. Hoa hồng ${prod.commissionRate}%.`;
+          ? `${prod.extraInfo}. Đã bán ${prod.salesCount}+ đơn trên Shopee.`
+          : `Sản phẩm hot với ${prod.salesCount}+ lượt bán trên Shopee.`;
         let finalTitle = prod.title;
         let finalPrice = prod.price || 0;
         let finalOriginalPrice = Math.round((prod.price || 0) * 1.3);
+        const industryCategoryId = autoCategorize(prod.title);
 
         let imageUrl = prod.imageUrl || '';
 
@@ -155,7 +157,7 @@ app.get("/api/auto-publish/stream", async (req, res) => {
               apiKey: geminiKey,
               productName: prod.title,
               rawLinkInput: prod.link,
-              categoryId: prod.categoryId,
+              categoryId: industryCategoryId,
               extraInfo: prod.extraInfo,
               price: prod.price
             });
@@ -166,30 +168,37 @@ app.get("/api/auto-publish/stream", async (req, res) => {
             finalOriginalPrice = contentRes.originalPrice || finalOriginalPrice;
 
             if (contentRes.imageKeyword && prod.imageUrl) {
-              sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tạo ảnh nền bằng Stable Diffusion...` });
+              sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tạo ảnh bằng GPU local (RTX 3060)...` });
               try {
-                const imageBase64 = await generateBackgroundImage(contentRes.imageKeyword, prod.imageUrl);
-                if (imageBase64) {
-                   // GenerateBackgroundImage actually returns a URL (replicate URL), but wait, the previous code expected base64.
-                   // Let's check stableDiffusion.ts. It returns a URL string if it's from Replicate.
-                   // So imageBase64 is actually an imageUrl.
-                   
-                   sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tải ảnh AI về máy và tải lên Supabase Storage...` });
-                   const imgFetch = await fetch(imageBase64);
-                   if (imgFetch.ok) {
-                     const imgBuffer = await imgFetch.arrayBuffer();
-                     const fileExt = 'png';
-                     const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 8)}.${fileExt}`;
-                     const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, imgBuffer, { contentType: 'image/png' });
-                     
-                     if (uploadError) {
-                       sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lỗi tải ảnh lên Supabase: ${uploadError.message}` });
-                     } else {
-                       const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
-                       imageUrl = data.publicUrl || imageBase64;
-                     }
+                const imageResult = await generateBackgroundImage(contentRes.imageKeyword, prod.imageUrl);
+                if (imageResult) {
+                   sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tải ảnh lên Supabase Storage...` });
+
+                   let imgBuffer: ArrayBuffer | Buffer;
+                   let contentType = 'image/jpeg';
+                   let fileExt = 'jpg';
+
+                   if (imageResult.startsWith('data:')) {
+                     const parsed = dataUrlToBuffer(imageResult);
+                     imgBuffer = parsed.buffer;
+                     contentType = parsed.mime;
+                     fileExt = parsed.mime.includes('png') ? 'png' : 'jpg';
                    } else {
-                     imageUrl = imageBase64; // Fallback to replicate URL
+                     const imgFetch = await fetch(imageResult);
+                     if (!imgFetch.ok) throw new Error('Không tải được ảnh từ URL');
+                     imgBuffer = await imgFetch.arrayBuffer();
+                     contentType = imgFetch.headers.get('content-type') || 'image/jpeg';
+                     fileExt = contentType.includes('png') ? 'png' : 'jpg';
+                   }
+
+                   const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 8)}.${fileExt}`;
+                   const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, imgBuffer, { contentType });
+
+                   if (uploadError) {
+                     sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lỗi tải ảnh lên Supabase: ${uploadError.message}` });
+                   } else {
+                     const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
+                     imageUrl = data.publicUrl || imageResult;
                    }
                 }
               } catch (imgErr: any) {
@@ -238,7 +247,7 @@ app.get("/api/auto-publish/stream", async (req, res) => {
           "originalPrice": finalOriginalPrice,
           "discountPercent": 23,
           "affiliateLink": prod.link,
-          "categoryId": prod.categoryId || '1',
+          "categoryId": industryCategoryId,
           platform: 'shopee',
           "soldCount": prod.salesCount || 0,
           "isSuggested": true,
@@ -512,6 +521,35 @@ CREATE INDEX IF NOT EXISTS idx_affiliate_products_created ON affiliate_products(
       res.json({ success: true, license: lic });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  const LOCAL_SD_URL = process.env.LOCAL_SD_URL || 'http://127.0.0.1:8765';
+
+  // Proxy tới máy tạo ảnh GPU local (RTX 3060) — chạy local-ai/start.bat
+  app.get('/api/local-image/health', async (_req, res) => {
+    try {
+      const r = await fetch(`${LOCAL_SD_URL}/health`, { signal: AbortSignal.timeout(4000) });
+      const data = await r.json();
+      res.json(data);
+    } catch {
+      res.status(503).json({ status: 'offline', message: 'Chạy local-ai/start.bat trên máy có GPU' });
+    }
+  });
+
+  app.post('/api/local-image/process', async (req, res) => {
+    try {
+      const r = await fetch(`${LOCAL_SD_URL}/process`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req.body),
+        signal: AbortSignal.timeout(180000),
+      });
+      const data = await r.json();
+      if (!r.ok) return res.status(r.status).json(data);
+      res.json(data);
+    } catch (e: any) {
+      res.status(503).json({ error: e.message || 'Local AI không phản hồi. Hãy chạy local-ai/start.bat' });
     }
   });
 

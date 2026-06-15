@@ -33,7 +33,7 @@ function createFallbackDescription(params: GeminiProductParams): GeminiProductRe
   
   return {
     title: `✨ ${productName}`,
-    description: `${productName}\n\n${extraInfo || 'Sản phẩm chất lượng cao, được tin dùng bởi hàng nghìn khách hàng. Sản phẩm này mang lại giá trị tuyệt vời với chất lượng vượt trội.\n\n✅ Chất lượng đảm bảo\n✅ Giá cạnh tranh\n✅ Bán chạy hàng ngày\n\nĐừng bỏ lỡ cơ hội sở hữu sản phẩm tuyệt vời này. Mua ngay hôm nay!'}`,
+    description: `✨ ${productName}\n\n${extraInfo || 'Sản phẩm chất lượng cao, được tin dùng bởi hàng nghìn khách hàng trên Shopee.'}\n\n📌 TỔNG QUAN SẢN PHẨM\nSản phẩm mang đến giá trị vượt trội với thiết kế tinh tế, chất liệu bền bỉ và mức giá cạnh tranh. Đây là lựa chọn lý tưởng cho những ai muốn sở hữu sản phẩm chất lượng mà không tốn quá nhiều chi phí.\n\n🎯 ĐIỂM NỔI BẬT\n✅ Chất lượng đảm bảo, nguồn gốc rõ ràng\n✅ Thiết kế hiện đại, phù hợp nhiều phong cách\n✅ Giá tốt, ưu đãi hấp dẫn khi mua qua liên kết\n✅ Được nhiều khách hàng đánh giá tích cực\n\n💡 HƯỚNG DẪN SỬ DỤNG\nSử dụng sản phẩm theo hướng dẫn trên bao bì hoặc mô tả của shop gốc. Bảo quản nơi khô ráo, thoáng mát để giữ chất lượng lâu dài.\n\n🛒 KÊU GỌI MUA HÀNG\nĐừng bỏ lỡ cơ hội sở hữu ${productName} với mức giá ưu đãi! Nhấn nút mua hàng bên dưới để chuyển đến trang Shopee chính thức, xem đánh giá thực tế và đặt hàng ngay hôm nay! 🎁`,
     price: price || 0,
     originalPrice: originalPrice || 0,
     imageKeyword: `${productName}, high-resolution product photo, on white background, realistic, masterpiece, highly detailed`
@@ -117,7 +117,7 @@ Giá: ${params.price || 0} VNĐ
 YÊU CẦU TRẢ VỀ DƯỚI DẠNG JSON HỢP LỆ THEO CẤU TRÚC SAU (không chứa markdown block):
 {
   "title": "Tiêu đề hấp dẫn ngắn gọn (kèm emoji)",
-  "description": "Bài mô tả sản phẩm cực kỳ chi tiết, sinh động, chèn emoji, chuẩn SEO, tập trung sâu vào lợi ích, công dụng và kêu gọi mua hàng. Khoảng 300-500 từ. TUYỆT ĐỐI KHÔNG NHẮC ĐẾN TỶ LỆ HOA HỒNG hay thông tin nội bộ của Shopee.",
+  "description": "Bài mô tả sản phẩm chi tiết, sinh động, chuẩn SEO. Chia mục bằng emoji: 📌 TỔNG QUAN, 🎯 ĐIỂM NỔI BẬT (4-6 bullet), 💡 MẸO SỬ DỤNG, 🛒 KÊU GỌI MUA HÀNG. TỐI ĐA 500 TỪ (không vượt quá). TUYỆT ĐỐI KHÔNG NHẮC HOA HỒNG hay thông tin nội bộ Shopee.",
   "price": ${params.price || 0},
   "originalPrice": ${params.originalPrice || 0},
   "imageKeyword": "Câu lệnh tiếng Anh chi tiết để vẽ ảnh nền mới cho sản phẩm này. Hãy tưởng tượng bối cảnh đẹp và phù hợp (ví dụ: đang ở bãi biển, con đường làng, quán cafe đẹp, không gian sang trọng). BẮT BUỘC giữ nguyên sản phẩm, người mẫu. Câu lệnh phải bắt đầu bằng: '${params.productName}, high-resolution product photo, placed on/in [new background description], realistic, masterpiece, highly detailed, keep original product intact, no extra text'"
@@ -132,11 +132,11 @@ YÊU CẦU TRẢ VỀ DƯỚI DẠNG JSON HỢP LỆ THEO CẤU TRÚC SAU (khôn
     throw new Error('Không có Gemini API key. Vui lòng thiết lập ít nhất 1 key.');
   }
 
-  // Models to try in order (from newest/most generous quota to oldest/limited)
+  // Models to try — ưu tiên bản free tier
   const modelsToTry = [
-    'gemini-2.0-flash-exp',    // Newest, best quota
-    'gemini-1.5-flash',        // Most stable, free tier friendly
-    'gemini-1.0-pro'           // Fallback (limited quota)
+    'gemini-1.5-flash',
+    'gemini-2.0-flash-exp',
+    'gemini-1.0-pro',
   ];
 
   // Try each key with each model

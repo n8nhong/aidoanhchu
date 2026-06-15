@@ -1,11 +1,21 @@
 @echo off
-rem ------------------------------------------------------------
-rem Deploy.bat – Tự động đẩy code lên GitHub, build dự án React và deploy
-rem Đặt trong thư mục gốc của dự án: Affilishop-main
-rem ------------------------------------------------------------
-
-rem Định vị thư mục script để tránh lỗi đường dẫn
+rem ============================================================
+rem  DEPLOY WEB — Affilishop-main
+rem  LUU Y: Neu can xu ly anh san pham bang GPU, chay TRUOC:
+rem         ..\may-tao-anh-ai\start.bat  (giu cua so mo)
+rem ============================================================
+chcp 65001 >nul
 cd /d "%~dp0"
+
+echo.
+echo ==== DEPLOY WEB AFFILISHOP ====
+echo.
+echo Neu ban can tao anh san pham bang RTX 3060:
+echo   1. Mo thu muc may-tao-anh-ai
+echo   2. Chay start.bat va GIU cua so do mo
+echo   3. Quay lai day chay deploy.bat
+echo.
+pause
 
 rem === Bước 1: Kiểm tra trạng thái Git ===
 echo ==== Kiểm tra Git ==== 

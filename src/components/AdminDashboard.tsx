@@ -53,9 +53,19 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSlidesForTopic } from '../utils/giftSlidesData';
-import { readCSVFile, parseCSV, parsePrice, validateShopeeLink, createStoreSlug, fetchShopeeImage } from '../utils/csvProcessor';
-import { replaceBackground, PRESET_BACKGROUNDS, processProductImageWithNewBackground, dataUrlToFile } from '../utils/imageProcessor';
+import { readCSVFile, parseCSV, parsePrice, validateShopeeLink, fetchShopeeImage } from '../utils/csvProcessor';
+import { PRESET_BACKGROUNDS, processProductImageWithNewBackground, processProductImageWithSceneBackground, dataUrlToFile } from '../utils/imageProcessor';
 import { generateProductContent } from '../utils/geminiClient';
+import { autoCategorize, isIndustryCategoryId, normalizeCategoryId, INDUSTRY_CATEGORY_NAMES } from '../utils/autoCategorize';
+import { getSceneBackgroundForCategory } from '../utils/categoryScenes';
+import {
+  processProductImageLocal,
+  isLocalImageServiceAvailable,
+  checkLocalImageService,
+  getLocalSdUrl,
+  setLocalSdUrl,
+  type LocalImageHealth,
+} from '../utils/localImageGen';
 import { ImageUploadModal } from './ImageUploadModal';
 
 // compressImage is now imported from ../utils
@@ -95,33 +105,6 @@ const CATEGORY_ICONS: Record<string, any> = {
   Home,
   HeartPulse,
   Baby
-};
-
-// Automatic Categorizer based on title words or link keywords
-const autoCategorize = (text: string): string => {
-  const lower = text.toLowerCase();
-  if (lower.includes('váy') || lower.includes('đầm') || lower.includes('chân váy') || lower.includes('yếm') || lower.includes('nữ') || lower.includes('croptop')) {
-    return '7'; // Thời Trang Nữ (id 7)
-  }
-  if (lower.includes('nam') || lower.includes('áo thun nam') || lower.includes('sơ mi nam') || lower.includes('polo') || lower.includes('quần nam') || lower.includes('quần tây')) {
-    return '1'; // Thời Trang Nam (id 1)
-  }
-  if (lower.includes('makeup') || lower.includes('son') || lower.includes('kem') || lower.includes('dưỡng da') || lower.includes('serum') || lower.includes('sữa rửa mặt') || lower.includes('mỹ phẩm') || lower.includes('phấn')) {
-    return '2'; // Mỹ Phẩm (id 2)
-  }
-  if (lower.includes('điện thoại') || lower.includes('tai nghe') || lower.includes('bluetooth') || lower.includes('sạc') || lower.includes('laptop') || lower.includes('vga') || lower.includes('bàn phím') || lower.includes('loa') || lower.includes('chuột')) {
-    return '3'; // Đồ Điện Tử (id 3)
-  }
-  if (lower.includes('nồi') || lower.includes('kệ') || lower.includes('bình') || lower.includes('gia dụng') || lower.includes('chảo') || lower.includes('dọn dẹp') || lower.includes('ghế') || lower.includes('bàn') || lower.includes('chổi')) {
-    return '4'; // Đồ Gia Dụng (id 4)
-  }
-  if (lower.includes('sức khoẻ') || lower.includes('thuốc') || lower.includes('bổ') || lower.includes('vitamin') || lower.includes('khẩu trang') || lower.includes('calci')) {
-    return '5'; // Sức Khoẻ (id 5)
-  }
-  if (lower.includes('mẹ') || lower.includes('bé') || lower.includes('bỉm') || lower.includes('sữa') || lower.includes('trẻ') || lower.includes('đồ chơi')) {
-    return '6'; // Mẹ & Bé (id 6)
-  }
-  return '1'; // Trả về mặc định
 };
 
 export function AdminDashboard({ 
@@ -483,11 +466,56 @@ export function AdminDashboard({
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvProducts, setCsvProducts] = useState<any[]>([]);
   const [csvConfig, setCsvConfig] = useState({
+    backgroundMode: 'scene' as 'scene' | 'color',
     backgroundColor: PRESET_BACKGROUNDS.WHITE,
     autoDescription: true,
     autoPriceMarkup: 20,
     autoCategory: true
   });
+  const [enhanceProcessing, setEnhanceProcessing] = useState({
+    isProcessing: false,
+    currentIndex: 0,
+    total: 0,
+    message: ''
+  });
+  const [localSdUrl, setLocalSdUrlState] = useState(() => getLocalSdUrl());
+  const [localSdHealth, setLocalSdHealth] = useState<LocalImageHealth | null>(null);
+
+  /** Kiểm tra GPU local có sẵn sàng không */
+  const refreshLocalSdHealth = async () => {
+    const health = await checkLocalImageService(localSdUrl);
+    setLocalSdHealth(health);
+    return health;
+  };
+
+  useEffect(() => {
+    refreshLocalSdHealth();
+    const interval = setInterval(refreshLocalSdHealth, 15000);
+    return () => clearInterval(interval);
+  }, [localSdUrl]);
+
+  /** Xử lý ảnh: ưu tiên GPU local, fallback ghép nền cảnh canvas */
+  const processProductImageSmart = async (
+    sourceImageUrl: string,
+    industryCategoryId: string,
+    productName: string,
+    imagePrompt?: string
+  ): Promise<string> => {
+    const localOk = await isLocalImageServiceAvailable(localSdUrl);
+    if (localOk) {
+      return processProductImageLocal({
+        imageUrl: sourceImageUrl,
+        prompt: imagePrompt,
+        categoryId: industryCategoryId,
+        productName,
+        baseUrl: localSdUrl,
+      });
+    }
+    const sceneUrl = getSceneBackgroundForCategory(industryCategoryId);
+    return csvConfig.backgroundMode === 'scene'
+      ? processProductImageWithSceneBackground(sourceImageUrl, sceneUrl)
+      : processProductImageWithNewBackground(sourceImageUrl, csvConfig.backgroundColor);
+  };
   const [csvProcessing, setCsvProcessing] = useState({
     isProcessing: false,
     currentIndex: 0,
@@ -586,81 +614,14 @@ export function AdminDashboard({
           continue;
         }
 
-        // 2️⃣ CREATE STORE CATEGORY
-        const storeSlug = createStoreSlug(product.shopName);
-        let storeCategory = categories.find(c => c.name.toLowerCase() === product.shopName.toLowerCase());
-        
-        if (!storeCategory) {
-          storeCategory = {
-            id: 'store_' + Date.now() + '_' + i,
-            name: product.shopName,
-            description: `Gian hàng: ${product.shopName}`,
-            icon: 'ShoppingBag'
-          };
-          
-          if (onSetCategories) {
-            onSetCategories(prev => [...prev, storeCategory]);
-          }
-        }
+        // 2️⃣ PHÂN LOẠI NGÀNH HÀNG (Thời Trang Nam/Nữ, Mỹ Phẩm, ...)
+        const industryCategoryId = csvConfig.autoCategory
+          ? autoCategorize(product.itemName)
+          : (categories.find(c => isIndustryCategoryId(c.id))?.id || '1');
 
-        // 3️⃣ FETCH IMAGE FROM SHOPEE
-        let imageUrl = '';
-        setCsvProcessing({
-          isProcessing: true,
-          currentIndex: i + 1,
-          total: csvProducts.length,
-          message: `📷 [${i + 1}/${csvProducts.length}] Tải ảnh: ${product.itemName.substring(0, 30)}...`
-        });
-
-        try {
-          let shopeeImageUrl = await fetchShopeeImage(product.offerLink || product.productLink);
-          
-          if (shopeeImageUrl) {
-            // 3.5️⃣ REMOVE BACKGROUND & REPLACE WITH NEW COLOR
-            setCsvProcessing({
-              isProcessing: true,
-              currentIndex: i + 1,
-              total: csvProducts.length,
-              message: `🎨 [${i + 1}/${csvProducts.length}] Xóa background & thay nền...`
-            });
-
-            try {
-              // Remove background and apply new background color
-              const processedImageDataUrl = await processProductImageWithNewBackground(
-                shopeeImageUrl,
-                csvConfig.backgroundColor
-              );
-
-              // Convert data URL to File
-              const imageFile = dataUrlToFile(
-                processedImageDataUrl,
-                `product_${i}_${Date.now()}.jpg`
-              );
-
-              // Upload to Supabase
-              imageUrl = await uploadImageToSupabase(imageFile) || '';
-              
-            } catch (bgErr) {
-              console.warn('Lỗi xóa background:', bgErr);
-              // Fallback: upload ảnh gốc từ Shopee
-              try {
-                const originalFile = await fetch(shopeeImageUrl).then(r => r.blob());
-                imageUrl = await uploadImageToSupabase(
-                  new File([originalFile], `product_${i}_original.jpg`, { type: 'image/jpeg' })
-                ) || '';
-              } catch (fallbackErr) {
-                console.warn('Fallback upload failed:', fallbackErr);
-              }
-            }
-          }
-        } catch (imgErr) {
-          console.warn('Lỗi tải ảnh từ Shopee:', imgErr);
-          // Tiếp tục mà không có ảnh
-        }
-
-        // 4️⃣ GENERATE AI DESCRIPTION
+        // 3️⃣ GENERATE AI DESCRIPTION (Gemini free, tối đa 500 từ)
         let aiDescription = product.itemName;
-        const geminiKey = geminiKeys?.find((k: any) => k.isActive)?.key;
+        let imagePrompt: string | undefined;
         
         if (csvConfig.autoDescription && geminiKeys && geminiKeys.length > 0) {
           try {
@@ -668,17 +629,16 @@ export function AdminDashboard({
               isProcessing: true,
               currentIndex: i + 1,
               total: csvProducts.length,
-              message: `✍️ [${i + 1}/${csvProducts.length}] Sinh mô tả AI (thử ${geminiKeys.length} key)...`
+              message: `✍️ [${i + 1}/${csvProducts.length}] Gemini viết mô tả...`
             });
 
-            // Extract all valid keys
             const validKeys = geminiKeys.filter((k: any) => k.key && k.key.trim()).map((k: any) => k.key.trim());
 
             const aiContent = await generateProductContent({
               apiKeys: validKeys,
               productName: product.itemName,
-              categoryId: storeCategory.id,
-              extraInfo: `Gian hàng: ${product.shopName}, Bán: ${product.sales}, Hoa hồng: ${product.commissionRate}`,
+              categoryId: industryCategoryId,
+              extraInfo: `Gian hàng: ${product.shopName}, Bán: ${product.sales}. Ngành hàng: ${INDUSTRY_CATEGORY_NAMES[industryCategoryId] || 'Thời Trang'}`,
               price: parsePrice(product.price),
               onProgress: (msg: string) => {
                 setCsvProcessing({
@@ -691,10 +651,55 @@ export function AdminDashboard({
             });
 
             aiDescription = aiContent.description || aiDescription;
+            imagePrompt = aiContent.imageKeyword;
           } catch (aiErr) {
             console.warn('Lỗi AI:', aiErr);
-            aiDescription = `${product.itemName}\n\n${product.shopName} - Sản phẩm chất lượng cao, ${product.sales} lượt bán, được yêu thích bởi khách hàng. Hoa hồng: ${product.commissionRate}.`;
+            aiDescription = `${product.itemName}\n\n${product.shopName} - Sản phẩm chất lượng cao, ${product.sales} lượt bán.`;
           }
+        }
+
+        // 4️⃣ FETCH IMAGE + GPU LOCAL TẠO NỀN
+        let imageUrl = '';
+        setCsvProcessing({
+          isProcessing: true,
+          currentIndex: i + 1,
+          total: csvProducts.length,
+          message: `🎨 [${i + 1}/${csvProducts.length}] GPU tạo ảnh: ${product.itemName.substring(0, 30)}...`
+        });
+
+        try {
+          let shopeeImageUrl = await fetchShopeeImage(product.offerLink || product.productLink);
+          
+          if (shopeeImageUrl) {
+            try {
+              const processedImageDataUrl = await processProductImageSmart(
+                shopeeImageUrl,
+                industryCategoryId,
+                product.itemName,
+                imagePrompt
+              );
+
+              const imageFile = dataUrlToFile(
+                processedImageDataUrl,
+                `product_${i}_${Date.now()}.jpg`
+              );
+
+              imageUrl = await uploadImageToSupabase(imageFile) || '';
+              
+            } catch (bgErr) {
+              console.warn('Lỗi xử lý ảnh:', bgErr);
+              try {
+                const originalFile = await fetch(shopeeImageUrl).then(r => r.blob());
+                imageUrl = await uploadImageToSupabase(
+                  new File([originalFile], `product_${i}_original.jpg`, { type: 'image/jpeg' })
+                ) || '';
+              } catch (fallbackErr) {
+                console.warn('Fallback upload failed:', fallbackErr);
+              }
+            }
+          }
+        } catch (imgErr) {
+          console.warn('Lỗi tải ảnh từ Shopee:', imgErr);
         }
 
         // 5️⃣ CREATE PRODUCT
@@ -708,7 +713,7 @@ export function AdminDashboard({
           originalPrice: basePrice,
           discountPercent: Math.round(((basePrice - markupPrice) / basePrice) * 100),
           image: imageUrl || '',
-          categoryId: storeCategory.id,
+          categoryId: industryCategoryId,
           affiliateLink: product.offerLink || product.productLink,
           platform: 'shopee',
           soldCount: parseInt(product.sales.replace(/[^\d]/g, '')) || 0,
@@ -744,6 +749,113 @@ export function AdminDashboard({
     });
 
     setSuccessMsg(`✅ Đã tạo ${successCount} sản phẩm từ CSV!${skippedCount > 0 ? `\n⏭️ Bỏ qua ${skippedCount} link hỏng` : ''}`);
+  };
+
+  /** Cải thiện sản phẩm đã đăng: phân loại đúng, ảnh nền cảnh, mô tả dài */
+  const handleEnhanceExistingProducts = async () => {
+    const targets = products.filter(p => !p.isDeleted && (
+      !p.image ||
+      (p.description?.length || 0) < 200 ||
+      !isIndustryCategoryId(p.categoryId)
+    ));
+
+    if (targets.length === 0) {
+      setSuccessMsg('✅ Tất cả sản phẩm đã có ảnh, mô tả đủ dài và phân loại đúng ngành hàng!');
+      return;
+    }
+
+    if (!window.confirm(`Sẽ cải thiện ${targets.length} sản phẩm (GPU local tạo ảnh + mô tả Gemini + phân loại). Tiếp tục?`)) return;
+
+    const localOk = await isLocalImageServiceAvailable(localSdUrl);
+    if (!localOk) {
+      const proceed = window.confirm(
+        '⚠️ Máy tạo ảnh GPU local chưa chạy!\n\n' +
+        'Chạy file may-tao-anh-ai\\start.bat trước để dùng RTX 3060.\n' +
+        'Nếu tiếp tục, hệ thống sẽ dùng ghép nền cảnh cơ bản (chất lượng thấp hơn).\n\nBạn có muốn tiếp tục?'
+      );
+      if (!proceed) return;
+    }
+
+    const validKeys = (geminiKeys || []).filter((k: any) => k.key?.trim()).map((k: any) => k.key.trim());
+    let successCount = 0;
+
+    setEnhanceProcessing({ isProcessing: true, currentIndex: 0, total: targets.length, message: 'Bắt đầu...' });
+
+    for (let i = 0; i < targets.length; i++) {
+      const item = targets[i];
+      try {
+        const industryCategoryId = normalizeCategoryId(item.title, item.categoryId);
+        let imageUrl = item.image;
+        let description = item.description || '';
+        let imagePrompt: string | undefined;
+
+        setEnhanceProcessing({
+          isProcessing: true,
+          currentIndex: i + 1,
+          total: targets.length,
+          message: `[${i + 1}/${targets.length}] ${item.title.substring(0, 35)}...`
+        });
+
+        // Sinh mô tả Gemini trước (tối đa 500 từ) + lấy prompt ảnh
+        if ((description.length || 0) < 200 && validKeys.length > 0) {
+          try {
+            setEnhanceProcessing(prev => ({ ...prev, message: `[${i + 1}/${targets.length}] ✍️ Gemini viết mô tả...` }));
+            const aiContent = await generateProductContent({
+              apiKeys: validKeys,
+              productName: item.title,
+              categoryId: industryCategoryId,
+              extraInfo: `Ngành hàng: ${INDUSTRY_CATEGORY_NAMES[industryCategoryId]}`,
+              price: item.price,
+              originalPrice: item.originalPrice,
+            });
+            description = aiContent.description || description;
+            imagePrompt = aiContent.imageKeyword;
+          } catch (aiErr) {
+            console.warn('Lỗi AI mô tả:', aiErr);
+          }
+        }
+
+        // Tải & xử lý ảnh bằng GPU local
+        const needsImage = !imageUrl || imageUrl.includes('shopee') || imageUrl.includes('susercontent.com');
+        if (needsImage && item.affiliateLink) {
+          try {
+            setEnhanceProcessing(prev => ({ ...prev, message: `[${i + 1}/${targets.length}] 🎨 GPU tạo ảnh nền...` }));
+            const shopeeImageUrl = await fetchShopeeImage(item.affiliateLink);
+            if (shopeeImageUrl) {
+              const processed = await processProductImageSmart(
+                shopeeImageUrl,
+                industryCategoryId,
+                item.title,
+                imagePrompt
+              );
+              const imageFile = dataUrlToFile(processed, `enhance_${item.id}_${Date.now()}.jpg`);
+              imageUrl = await uploadImageToSupabase(imageFile) || processed;
+            }
+          } catch (imgErr) {
+            console.warn('Lỗi xử lý ảnh:', imgErr);
+          }
+        }
+
+        onUpdateProduct({
+          ...item,
+          categoryId: industryCategoryId,
+          image: imageUrl || item.image,
+          description: description || item.description,
+        });
+        successCount++;
+        await new Promise(r => setTimeout(r, 400));
+      } catch (err) {
+        console.error('Lỗi cải thiện sản phẩm:', err);
+      }
+    }
+
+    setEnhanceProcessing({
+      isProcessing: false,
+      currentIndex: successCount,
+      total: targets.length,
+      message: `✅ Đã cải thiện ${successCount}/${targets.length} sản phẩm`
+    });
+    setSuccessMsg(`✅ Đã cải thiện ${successCount}/${targets.length} sản phẩm! Nhớ bấm "Đẩy lên Cloud" để đồng bộ web.`);
   };
 
   const startAutoPublish = async () => {
@@ -3261,8 +3373,8 @@ export function AdminDashboard({
                   Mô tả sản phẩm
                 </label>
                 <textarea 
-                  rows={2}
-                  placeholder="Chất vải dầy dặn, giặt không xù, phom dáng Hàn Quốc..." 
+                  rows={10}
+                  placeholder="Mô tả chi tiết 500+ từ: tổng quan, điểm nổi bật, hướng dẫn sử dụng, kêu gọi mua hàng..." 
                   className="w-full border border-gray-300 rounded-sm px-3 py-2 text-xs focus:outline-none focus:border-shopee-orange"
                   value={description}
                   onChange={e => setDescription(e.target.value)}
@@ -3371,17 +3483,41 @@ export function AdminDashboard({
           </div>
 
           <div className="bg-white rounded-md shadow-sm border border-gray-200 p-5">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-gray-100 mb-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-gray-100 mb-4">
               <div>
                 <h3 className="font-bold text-gray-800 text-sm">
                   Danh Sách Sản Phẩm Được Đăng ({products.length})
                 </h3>
                 <p className="text-xs text-gray-500">Nhấp <span className="text-orange-500 font-bold">★ Ngôi sao và Bật</span> để đưa vào "Gợi ý Hôm nay". Có thể xóa vĩnh viễn tin đăng.</p>
               </div>
-              <div className="text-xs bg-gray-50 px-2 py-1 rounded border text-gray-500">
-                Đang đề xuất: <span className="font-bold text-shopee-orange">{products.filter(p => p.isSuggested).length}</span> bài
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleEnhanceExistingProducts}
+                  disabled={enhanceProcessing.isProcessing || products.length === 0}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-bold bg-gradient-to-r from-violet-500 to-purple-600 text-white hover:from-violet-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                  title="Tự động: phân loại ngành hàng, ảnh nền cảnh, mô tả dài"
+                >
+                  <Wand2 className="w-3.5 h-3.5" />
+                  {enhanceProcessing.isProcessing ? 'Đang cải thiện...' : '✨ Cải thiện SP đã đăng'}
+                </button>
+                <div className="text-xs bg-gray-50 px-2 py-1 rounded border text-gray-500">
+                  Đang đề xuất: <span className="font-bold text-shopee-orange">{products.filter(p => p.isSuggested).length}</span> bài
+                </div>
               </div>
             </div>
+
+            {enhanceProcessing.isProcessing && (
+              <div className="mb-4 p-3 bg-violet-50 border border-violet-200 rounded text-xs text-violet-800">
+                <div className="font-bold mb-1">🔄 {enhanceProcessing.message}</div>
+                <div className="w-full bg-violet-200 rounded-full h-1.5 mt-1">
+                  <div
+                    className="bg-violet-600 h-1.5 rounded-full transition-all"
+                    style={{ width: `${enhanceProcessing.total ? (enhanceProcessing.currentIndex / enhanceProcessing.total) * 100 : 0}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
             {products.length === 0 ? (
               <div className="text-center py-12 border-2 border-dashed border-gray-200 rounded-md">
@@ -3421,7 +3557,7 @@ export function AdminDashboard({
                             </span>
                             <span className="bg-orange-50 text-shopee-orange px-1.5 py-0.5 rounded font-bold flex items-center gap-1">
                               <CatIcon className="w-2.5 h-2.5" />
-                              {categories.find(c => c.id === item.categoryId)?.name || 'Thời Trang'}
+                              {categories.find(c => c.id === item.categoryId)?.name || INDUSTRY_CATEGORY_NAMES[item.categoryId] || 'Chưa phân loại'}
                             </span>
                             <span className="font-bold text-gray-700">{formatCurrency(item.price)}</span>
                             {item.discountPercent > 0 && <span className="text-red-500">(-{item.discountPercent}%)</span>}
@@ -5320,9 +5456,45 @@ export function AdminDashboard({
             <h2 className="text-2xl font-black text-cyan-900 mb-2 flex items-center gap-2">
               📊 Auto-Import từ CSV
             </h2>
-            <p className="text-cyan-700 mb-6">
+            <p className="text-cyan-700 mb-4">
               Tải file CSV → Tự động điền thông tin sản phẩm → Đăng bài hàng loạt
             </p>
+
+            {/* GPU Local Status */}
+            <div className={`mb-6 p-4 rounded-lg border-2 ${localSdHealth?.status === 'ok' ? 'bg-emerald-50 border-emerald-300' : 'bg-amber-50 border-amber-300'}`}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-sm flex items-center gap-2">
+                    🖥️ Máy tạo ảnh GPU Local (RTX 3060)
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${localSdHealth?.status === 'ok' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'}`}>
+                      {localSdHealth?.status === 'ok' ? 'ĐANG CHẠY' : 'CHƯA KẾT NỐI'}
+                    </span>
+                  </h3>
+                  {localSdHealth?.status === 'ok' ? (
+                    <p className="text-xs text-emerald-800 mt-1">
+                      GPU: {localSdHealth.gpu} ({localSdHealth.vram_gb}GB VRAM) — ảnh tạo trên máy bạn, upload lên Supabase
+                    </p>
+                  ) : (
+                    <p className="text-xs text-amber-800 mt-1">
+                      Chạy <code className="bg-white px-1 rounded">may-tao-anh-ai\install.bat</code> lần đầu, sau đó <code className="bg-white px-1 rounded">may-tao-anh-ai\start.bat</code> mỗi khi xử lý ảnh
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={localSdUrl}
+                    onChange={(e) => setLocalSdUrlState(e.target.value)}
+                    onBlur={() => { setLocalSdUrl(localSdUrl); refreshLocalSdHealth(); }}
+                    className="text-xs border rounded px-2 py-1 w-44"
+                    placeholder="http://127.0.0.1:8765"
+                  />
+                  <button type="button" onClick={refreshLocalSdHealth} className="text-xs px-2 py-1 bg-white border rounded font-bold hover:bg-gray-50">
+                    🔄
+                  </button>
+                </div>
+              </div>
+            </div>
 
             <div className="space-y-6">
               {/* File Upload */}
@@ -5402,19 +5574,29 @@ export function AdminDashboard({
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">
-                    🎨 Background
+                    🎨 Kiểu nền ảnh
                   </label>
                   <select
-                    value={csvConfig.backgroundColor}
-                    onChange={(e) => setCsvConfig({ ...csvConfig, backgroundColor: e.target.value })}
+                    value={csvConfig.backgroundMode}
+                    onChange={(e) => setCsvConfig({ ...csvConfig, backgroundMode: e.target.value as 'scene' | 'color' })}
                     className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-cyan-500"
                   >
-                    <option value="#FFFFFF">⚪ Trắng</option>
-                    <option value="#FFE5E5">🔴 Hồng nhạt</option>
-                    <option value="#E5F2FF">🔵 Xanh nhạt</option>
-                    <option value="#FFFBE5">🟡 Vàng nhạt</option>
-                    <option value="#E5F9E5">🟢 Xanh lá nhạt</option>
+                    <option value="scene">🖼️ Cảnh phù hợp ngành hàng (khuyên dùng)</option>
+                    <option value="color">🎨 Màu nền đơn sắc</option>
                   </select>
+                  {csvConfig.backgroundMode === 'color' && (
+                    <select
+                      value={csvConfig.backgroundColor}
+                      onChange={(e) => setCsvConfig({ ...csvConfig, backgroundColor: e.target.value })}
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm mt-2 focus:outline-none focus:border-cyan-500"
+                    >
+                      <option value="#FFFFFF">⚪ Trắng</option>
+                      <option value="#FFE5E5">🔴 Hồng nhạt</option>
+                      <option value="#E5F2FF">🔵 Xanh nhạt</option>
+                      <option value="#FFFBE5">🟡 Vàng nhạt</option>
+                      <option value="#E5F9E5">🟢 Xanh lá nhạt</option>
+                    </select>
+                  )}
                 </div>
 
                 <div>
@@ -5442,7 +5624,7 @@ export function AdminDashboard({
                     className="w-4 h-4 rounded accent-cyan-500"
                   />
                   <span className="text-sm text-gray-700 group-hover:text-cyan-700">
-                    ✍️ Tự động sinh mô tả từ tên sản phẩm
+                    ✍️ Tự động sinh mô tả Gemini (tối đa 500 từ)
                   </span>
                 </label>
                 <label className="flex items-center gap-3 cursor-pointer group">
@@ -5453,7 +5635,7 @@ export function AdminDashboard({
                     className="w-4 h-4 rounded accent-cyan-500"
                   />
                   <span className="text-sm text-gray-700 group-hover:text-cyan-700">
-                    🏷️ Tự động phân loại danh mục
+                    🏷️ Tự động phân loại ngành hàng (Nam/Nữ/Mỹ phẩm/...)
                   </span>
                 </label>
               </div>

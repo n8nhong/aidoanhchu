@@ -244,6 +244,89 @@ export const removeBackground = async (
 };
 
 /**
+ * Ghép sản phẩm (đã tách nền) lên ảnh cảnh nền, căn giữa và scale vừa khung.
+ */
+const compositeProductOnScene = async (
+  transparentProductUrl: string,
+  sceneImageUrl: string,
+  outputSize: number = 800
+): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) {
+      reject(new Error('Canvas context not available'));
+      return;
+    }
+
+    const productImg = new Image();
+    const sceneImg = new Image();
+    let loadedCount = 0;
+
+    const onImageLoaded = () => {
+      loadedCount++;
+      if (loadedCount !== 2) return;
+
+      canvas.width = outputSize;
+      canvas.height = outputSize;
+
+      // Vẽ nền cảnh (cover)
+      const bgRatio = sceneImg.width / sceneImg.height;
+      const canvasRatio = 1;
+      let sx = 0, sy = 0, sw = sceneImg.width, sh = sceneImg.height;
+      if (bgRatio > canvasRatio) {
+        sw = sceneImg.height;
+        sx = (sceneImg.width - sw) / 2;
+      } else {
+        sh = sceneImg.width;
+        sy = (sceneImg.height - sh) / 2;
+      }
+      ctx.drawImage(sceneImg, sx, sy, sw, sh, 0, 0, outputSize, outputSize);
+
+      // Vẽ sản phẩm căn giữa, chiếm ~82% khung
+      const maxW = outputSize * 0.82;
+      const maxH = outputSize * 0.82;
+      const scale = Math.min(maxW / productImg.width, maxH / productImg.height);
+      const w = productImg.width * scale;
+      const h = productImg.height * scale;
+      const x = (outputSize - w) / 2;
+      const y = (outputSize - h) / 2;
+      ctx.drawImage(productImg, x, y, w, h);
+
+      resolve(canvas.toDataURL('image/jpeg', 0.92));
+    };
+
+    productImg.crossOrigin = 'anonymous';
+    sceneImg.crossOrigin = 'anonymous';
+    productImg.onload = onImageLoaded;
+    sceneImg.onload = onImageLoaded;
+    productImg.onerror = () => reject(new Error('Failed to load product image'));
+    sceneImg.onerror = () => reject(new Error('Failed to load scene background'));
+
+    productImg.src = transparentProductUrl;
+    sceneImg.src = sceneImageUrl;
+  });
+};
+
+/**
+ * Giữ nguyên sản phẩm gốc, xóa nền cũ và đặt lên cảnh phù hợp ngành hàng.
+ */
+export const processProductImageWithSceneBackground = async (
+  imageUrl: string,
+  sceneImageUrl: string,
+  removeBackgroundApiKey?: string
+): Promise<string> => {
+  try {
+    const transparentImageUrl = await removeBackground(imageUrl, removeBackgroundApiKey);
+    return await compositeProductOnScene(transparentImageUrl, sceneImageUrl);
+  } catch (error) {
+    console.error('Error processing product image with scene:', error);
+    return imageUrl;
+  }
+};
+
+/**
  * Xóa background và thay nền mới (giữ nguyên sản phẩm)
  */
 export const processProductImageWithNewBackground = async (

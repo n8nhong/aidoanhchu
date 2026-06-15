@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { setItemResilient, compressImage } from './utils';
+import { isIndustryCategoryId } from './utils/autoCategorize';
 import { ProductCard } from './components/ProductCard';
 import { ProductModal } from './components/ProductModal';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -484,6 +485,13 @@ export default function App() {
     } catch (e) {}
     return []; // Fix: Avoid overwriting with default categories
   });
+
+  // Chỉ hiển thị danh mục ngành hàng trên trang chủ (ẩn danh mục shop store_*)
+  const displayCategories = useMemo(() => {
+    const industry = categories.filter(c => isIndustryCategoryId(c.id));
+    if (industry.length > 0) return industry;
+    return categories.filter(c => !String(c.id).startsWith('store_'));
+  }, [categories]);
 
   const [giftPreference, setGiftPreference] = useState<string>('affiliate');
 
@@ -1501,7 +1509,7 @@ Bạn muốn tìm hiểu thêm về khía cạnh nào? Hãy gõ câu hỏi hoặ
               
               {/* Horizontally scrollable category viewport ("có thanh cuộn") */}
               <div className="p-4 flex overflow-x-auto gap-5 pb-3 scrollbar-thin scroll-smooth select-none scrollbar-thumb-orange-100">
-                {categories.map(cat => {
+                {displayCategories.map(cat => {
                   const Icon = ICON_MAP[cat.iconName] || Search;
                   const isSelected = selectedCategory === cat.id;
                   return (
@@ -1624,7 +1632,7 @@ Bạn muốn tìm hiểu thêm về khía cạnh nào? Hãy gõ câu hỏi hoặ
 
                     {selectedCategory && (
                       <span className="text-[10px] text-yellow-300 bg-white/10 px-2 py-0.5 rounded font-bold uppercase hidden sm:inline">
-                        Lọc: {categories.find(c => c.id === selectedCategory)?.name}
+                        Lọc: {displayCategories.find(c => c.id === selectedCategory)?.name || categories.find(c => c.id === selectedCategory)?.name}
                       </span>
                     )}
                   </div>
