@@ -149,7 +149,7 @@ export function AdminDashboard({
   const stats = MOCK_STATS;
 
   // Active sub-tab in admin panel
-  const [adminTab, setAdminTab] = useState<'listings' | 'analytics' | 'social' | 'online_campaigns' | 'gemini_keys' | 'licenses' | 'database'>('listings');
+  const [adminTab, setAdminTab] = useState<'listings' | 'analytics' | 'social' | 'online_campaigns' | 'gemini_keys' | 'licenses' | 'database' | 'auto_publish'>('listings');
 
   const [licenses, setLicenses] = useState<any[]>([]);
   const [newLicenseName, setNewLicenseName] = useState('');
@@ -459,6 +459,54 @@ const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('s
   const [reportLoading, setReportLoading] = useState(false);
   const [aiReport, setAiReport] = useState<any>(null);
   const [scheduleType, setScheduleType] = useState('hang_ngay'); // hang_ngay, hang_tuan, dinh_ky
+
+  // Auto Publish States
+  const [apCount, setApCount] = useState(20);
+  const [apLogs, setApLogs] = useState<string[]>([]);
+  const [apStatus, setApStatus] = useState<'idle'|'running'|'done'|'error'>('idle');
+  const [apProgress, setApProgress] = useState({ current: 0, total: 0 });
+
+  const startAutoPublish = async () => {
+    if (!window.confirm(`Bạn sắp bắt đầu Auto Publish ${apCount} sản phẩm. Quá trình này có thể mất vài phút. Tiếp tục?`)) return;
+    
+    setApStatus('running');
+    setApLogs(['Bắt đầu kết nối đến máy chủ...']);
+    setApProgress({ current: 0, total: apCount });
+
+    try {
+      const source = new EventSource(`/api/auto-publish/stream?limit=${apCount}`);
+      
+      source.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'log') {
+          setApLogs(prev => [...prev, data.message]);
+        } else if (data.type === 'progress') {
+          setApProgress({ current: data.current, total: data.total });
+          if (data.message) {
+            setApLogs(prev => [...prev, data.message]);
+          }
+        } else if (data.type === 'error') {
+          setApLogs(prev => [...prev, `LỖI: ${data.message}`]);
+          setApStatus('error');
+          source.close();
+        } else if (data.type === 'done') {
+          setApLogs(prev => [...prev, `✅ Hoàn tất! Đã xử lý ${data.processed || 0} sản phẩm.`]);
+          setApStatus('done');
+          source.close();
+        }
+      };
+
+      source.onerror = (err) => {
+        console.error('EventSource error:', err);
+        setApLogs(prev => [...prev, 'Lỗi kết nối Stream. Quá trình có thể đã dừng (Timeout) hoặc vẫn chạy ngầm.']);
+        setApStatus('error');
+        source.close();
+      };
+    } catch (err: any) {
+      setApLogs(prev => [...prev, `Lỗi khởi tạo: ${err.message}`]);
+      setApStatus('error');
+    }
+  };
 
   const saveSocials = (channels: any) => {
     setSocials(channels);
@@ -907,14 +955,18 @@ const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('s
                   <div class="w-px h-4 bg-indigo-100"></div>
                   <button id="btn-font-inc" class="px-3 py-2 text-indigo-700 hover:bg-indigo-50 transition-colors font-bold text-base" title="Phóng to chữ">A+</button>
                 </div>
-                <button id="main-toggle-toc-btn" class="bg-indigo-50 text-indigo-700 hover:bg-indigo-100 active:scale-[0.98] font-extrabold py-2 px-3 rounded-xl text-xs transition-all shadow-sm flex items-center gap-1.5 cursor-pointer uppercase tracking-wider border border-indigo-200">
-                  <span id="toc-toggle-icon">◀</span> Mục lục
-                </button>
                 <button 
                   onclick="window.print()" 
                   class="bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white font-extrabold py-2 px-4 rounded-xl text-xs transition-all shadow-md flex items-center gap-1.5 cursor-pointer uppercase tracking-wider"
                 >
                   🖨️ Lưu file PDF / In Sách
+                </button>
+                <button 
+                  id="run-auto-publish"
+                  class="bg-green-600 hover:bg-green-700 text-white font-extrabold py-2 px-4 rounded-xl text-xs transition-all shadow-md flex items-center gap-1.5 cursor-pointer uppercase tracking-wider"
+                  onclick="handleRunAutoPublish()"
+                >
+                  🚀 Run Auto Publish
                 </button>
             </div>
         </header>
@@ -1977,6 +2029,12 @@ const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('s
           className={`pb-3 px-4 font-bold uppercase tracking-wider transition-all border-b-2 cursor-pointer relative ${adminTab === 'database' ? 'border-shopee-orange text-shopee-orange' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
         >
           💾 Lưu Trữ Đám Mây (Supabase)
+        </button>
+        <button 
+          onClick={() => setAdminTab('auto_publish')}
+          className={`pb-3 px-4 font-bold uppercase tracking-wider transition-all border-b-2 cursor-pointer relative ${adminTab === 'auto_publish' ? 'border-shopee-orange text-shopee-orange' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+        >
+          ⚡ Auto Publish (Tự Động)
         </button>
         {adminRole === 'super' && (
           <button 
@@ -4952,6 +5010,98 @@ const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('s
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {adminTab === 'auto_publish' && (
+        <div className="space-y-6 max-w-5xl mx-auto">
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8">
+            <h2 className="text-2xl font-black text-gray-900 mb-2">⚡ Tự Động Đăng Bài (Auto Publish)</h2>
+            <p className="text-gray-600 mb-8">
+              Cấu hình quá trình tự động thu thập sản phẩm từ Shopee, tạo nội dung bán hàng bằng AI, sinh ảnh nền bằng AI và đăng tải sản phẩm.
+            </p>
+
+            <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 space-y-6">
+              <div className="flex items-center gap-4">
+                <div className="w-1/2">
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Số lượng sản phẩm mỗi lần chạy</label>
+                  <input 
+                    type="number" 
+                    min="1" max="100"
+                    className="w-full border-gray-300 rounded-lg shadow-sm focus:border-shopee-orange focus:ring-shopee-orange p-3"
+                    value={apCount}
+                    onChange={e => setApCount(Number(e.target.value))}
+                    disabled={apStatus === 'running'}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Nên chạy 10-20 sản phẩm để tránh quá tải AI hoặc bị Shopee chặn.</p>
+                </div>
+                <div className="w-1/2 flex items-end">
+                  <button
+                    onClick={startAutoPublish}
+                    disabled={apStatus === 'running'}
+                    className="w-full bg-gradient-to-r from-shopee-orange to-[#ff6b6b] text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {apStatus === 'running' ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Đang Chạy Auto Publish...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-5 h-5" />
+                        Run Auto Publish
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {apStatus !== 'idle' && (
+                <div className="space-y-4 pt-6 border-t border-gray-200">
+                  <div className="flex justify-between items-center text-sm font-bold">
+                    <span className="text-gray-700">Tiến trình hiện tại:</span>
+                    <span className="text-shopee-orange">{apProgress.current} / {apProgress.total}</span>
+                  </div>
+                  
+                  {/* Progress Bar */}
+                  <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden relative">
+                    <div 
+                      className="bg-shopee-orange h-4 transition-all duration-500" 
+                      style={{ width: `${apProgress.total > 0 ? (apProgress.current / apProgress.total) * 100 : 0}%` }}
+                    ></div>
+                  </div>
+
+                  {/* Log View */}
+                  <div className="bg-black text-green-400 font-mono text-sm p-4 rounded-lg h-64 overflow-y-auto space-y-1">
+                    {apLogs.map((log, idx) => (
+                      <div key={idx} className="flex gap-2">
+                        <span className="text-gray-500 shrink-0">[{new Date().toLocaleTimeString()}]</span>
+                        <span className={log.includes('LỖI') || log.includes('❌') ? 'text-red-400' : (log.includes('✅') ? 'text-yellow-400' : '')}>
+                          {log}
+                        </span>
+                      </div>
+                    ))}
+                    {apStatus === 'running' && (
+                      <div className="animate-pulse flex items-center gap-2 text-gray-500">
+                        <span>[{new Date().toLocaleTimeString()}]</span>
+                        <span>Đang xử lý... <span className="inline-block w-2 h-4 bg-green-400 ml-1"></span></span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-8 bg-blue-50/50 p-6 rounded-xl border border-blue-100">
+              <h3 className="font-bold text-blue-900 mb-2 flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-blue-600" />
+                Lên Lịch Chạy Tự Động (Google Cloud Scheduler)
+              </h3>
+              <p className="text-sm text-blue-800 mb-4">
+                Nếu bạn đã thiết lập cấu hình Cloud Scheduler, hệ thống sẽ tự động gọi tiến trình này mỗi ngày vào 05:00 Sáng (Việt Nam). Bạn có thể thay đổi trong cấu hình Google Cloud. 
+              </p>
+            </div>
           </div>
         </div>
       )}

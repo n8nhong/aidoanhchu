@@ -20,7 +20,151 @@ async function startServer() {
 
   // --- BEGIN SHARED LINK FIX ---
   // Store data persistently during instance lifetime so "tạo rồi chia sẻ link" works
-  const DB_FILE = path.join(process.cwd(), 'local-db.json');
+  // Ensure Supabase storage bucket for product images exists
+async function ensureProductImagesBucket() {
+  const supabase = getSupabase();
+  if (!supabase) return;
+  try {
+    // @ts-ignore Supabase storage createBucket may be available in the client
+    const { data, error } = await supabase.storage.createBucket('product-images', { public: true });
+    if (error) {
+      // If bucket already exists, Supabase returns a specific error message
+      if (error.message && error.message.includes('already exists')) {
+        console.log('Bucket product-images already exists.');
+      } else {
+        console.error('Error creating Supabase bucket product-images:', error);
+      }
+    } else {
+      console.log('Supabase bucket product-images created successfully.');
+    }
+  } catch (e) {
+    console.error('Exception while ensuring bucket exists:', e);
+  }
+}
+
+// Call bucket initialization at server start
+ensureProductImagesBucket();
+
+// API Route for Auto Publish (Stream)
+app.get("/api/auto-publish/stream", async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  const sendEvent = (data: any) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    const limit = Number(req.query.limit) || 20; // default 20 products per run
+    
+    sendEvent({ type: 'log', message: 'Bắt đầu cào dữ liệu từ Shopee...' });
+    const rawProducts = await fetchShopeeProducts();
+    const filtered = rawProducts.filter(p => (p.sales || 0) > 1000 && (p.commissionRate || 0) >= 12);
+    const toProcess = filtered.slice(0, limit);
+
+    sendEvent({ type: 'log', message: `Đã tìm thấy ${toProcess.length} sản phẩm thỏa mãn điều kiện (>1000 lượt bán, hoa hồng >=12%).` });
+
+    const supabase = getSupabase();
+    if (!supabase) {
+      sendEvent({ type: 'error', message: 'Supabase chưa được cấu hình. Vui lòng kiểm tra tab Database.' });
+      return res.end();
+    }
+
+    const results: any[] = [];
+    for (let i = 0; i < toProcess.length; i++) {
+      const prod = toProcess[i];
+      try {
+        sendEvent({ type: 'progress', current: i + 1, total: toProcess.length, message: `Đang xử lý: ${prod.title.substring(0, 40)}...` });
+        
+        sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tạo nội dung AI cho sản phẩm...` });
+        const contentRes = await generateProductContent({
+          productName: prod.title,
+          rawLinkInput: prod.link,
+          categoryId: prod.categoryId,
+          extraInfo: prod.extraInfo,
+          productImageBase64: ''
+        });
+
+        sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tạo ảnh nền bằng Stable Diffusion...` });
+        let imageBase64 = '';
+        try {
+          imageBase64 = await generateBackgroundImage({ prompt: contentRes.imageKeyword });
+        } catch (imgErr: any) {
+           sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lỗi tạo ảnh (bỏ qua): ${imgErr.message}` });
+        }
+
+        let imageUrl = '';
+        if (imageBase64) {
+          sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tải ảnh lên Supabase Storage...` });
+          const fileExt = 'png';
+          const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 8)}.${fileExt}`;
+          const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, Buffer.from(imageBase64, 'base64'));
+          
+          if (uploadError) {
+            sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lỗi tải ảnh lên: ${uploadError.message}` });
+          } else {
+            const { publicURL } = supabase.storage.from('product-images').getPublicUrl(fileName);
+            imageUrl = publicURL || '';
+          }
+        }
+
+        sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lưu sản phẩm vào cơ sở dữ liệu...` });
+        const { error: dbError } = await supabase.from('products').upsert({
+          title: contentRes.title,
+          description: contentRes.description,
+          image_url: imageUrl,
+          price: contentRes.price,
+          original_price: contentRes.originalPrice,
+          affiliate_link: prod.link,
+          category_id: autoCategorize(prod.title) // automatically assign category
+        }, { returning: 'minimal' });
+
+        if (dbError) {
+          sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lỗi lưu sản phẩm (products): ${dbError.message}` });
+        } else {
+          results.push({ title: contentRes.title, status: 'published' });
+          sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] ✅ Đã đăng thành công.` });
+        }
+      } catch (prodErr: any) {
+        sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] ❌ Bỏ qua sản phẩm do lỗi: ${prodErr.message}` });
+      }
+    }
+
+    sendEvent({ type: 'log', message: `Đang đồng bộ dữ liệu vào bảng online_products...` });
+    const onlineProducts = toProcess.map(p => ({
+      id: p.id,
+      title: p.title,
+      type: 'digital',
+      price: p.price,
+      originalprice: p.originalPrice,
+      isfree: false,
+      downloadurl: null,
+      htmlcontent: null,
+      isshowonhome: true,
+      issystemgenerated: true,
+      ispubliclyclaimable: true,
+      allowedbuyerids: null
+    }));
+    
+    if (onlineProducts.length > 0) {
+      const { error: opError } = await supabase.from('online_products').upsert(onlineProducts, { returning: 'minimal' });
+      if (opError) {
+        sendEvent({ type: 'log', message: `Lỗi đồng bộ online_products: ${opError.message}` });
+      } else {
+        sendEvent({ type: 'log', message: `Đã đồng bộ ${onlineProducts.length} sản phẩm vào online_products.` });
+      }
+    }
+
+    sendEvent({ type: 'done', processed: results.length, details: results });
+  } catch (e: any) {
+    console.error('Auto publish error:', e);
+    sendEvent({ type: 'error', message: e.message });
+  } finally {
+    res.end();
+  }
+});
+
   let tmpDbData: any = {};
   let globalSupabaseConfig = {
     url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://encpsaatojnxgyjjcvnx.supabase.co',

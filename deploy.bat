@@ -26,6 +26,14 @@ if not exist "package.json" (
     exit /b 1
 )
 
+echo ==== Khởi tạo tài nguyên ====
+node scripts/createBucket.js
+if errorlevel 1 (
+    echo Lỗi khi tạo bucket.
+    pause
+    exit /b 1
+)
+
 echo ==== Cài đặt dependencies (npm install) ==== 
 npm install
 if errorlevel 1 (
