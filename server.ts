@@ -18,6 +18,24 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+  const DB_FILE = path.join(process.cwd(), 'db-config.json');
+  let tmpDbData: any = {};
+  let globalSupabaseConfig = {
+    url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://encpsaatojnxgyjjcvnx.supabase.co',
+    key: process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''
+  };
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+      tmpDbData = parsed.tmpDbData || {};
+      globalSupabaseConfig = parsed.globalSupabaseConfig || globalSupabaseConfig;
+    }
+  } catch (e) {}
+
+  const saveToDisk = () => {
+    try { fs.writeFileSync(DB_FILE, JSON.stringify({ tmpDbData, globalSupabaseConfig })); } catch (e) {}
+  };
+
   // --- BEGIN SHARED LINK FIX ---
   // Store data persistently during instance lifetime so "tạo rồi chia sẻ link" works
   // Ensure Supabase storage bucket for product images exists
@@ -70,6 +88,9 @@ app.get("/api/auto-publish/stream", async (req, res) => {
     const toProcess = filtered;
 
     sendEvent({ type: 'log', message: `Đã tìm thấy ${toProcess.length} sản phẩm thỏa mãn điều kiện (>1000 lượt bán, hoa hồng >=12%).` });
+
+    if (globalSupabaseConfig.url) process.env.SUPABASE_URL = globalSupabaseConfig.url;
+    if (globalSupabaseConfig.key) process.env.SUPABASE_KEY = globalSupabaseConfig.key;
 
     const supabase = getSupabase();
     if (!supabase) {
@@ -172,23 +193,6 @@ app.get("/api/auto-publish/stream", async (req, res) => {
     res.end();
   }
 });
-
-  let tmpDbData: any = {};
-  let globalSupabaseConfig = {
-    url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://encpsaatojnxgyjjcvnx.supabase.co',
-    key: process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''
-  };
-  try {
-    if (fs.existsSync(DB_FILE)) {
-      const parsed = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-      tmpDbData = parsed.tmpDbData || {};
-      globalSupabaseConfig = parsed.globalSupabaseConfig || globalSupabaseConfig;
-    }
-  } catch (e) {}
-
-  const saveToDisk = () => {
-    try { fs.writeFileSync(DB_FILE, JSON.stringify({ tmpDbData, globalSupabaseConfig })); } catch (e) {}
-  };
 
   app.get("/api/db-config", (req, res) => {
     res.json(globalSupabaseConfig);
