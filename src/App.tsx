@@ -251,7 +251,7 @@ export default function App() {
         try {
           const [digRes, affRes, giftRes] = await Promise.all([
             fetch(`${url}/rest/v1/digital_products`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' }),
-            fetch(`${url}/rest/v1/affiliate_products`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' }),
+            fetch(`/api/affiliate-products`, { cache: 'no-store' }),
             fetch(`${url}/rest/v1/gifts`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' })
           ]);
 

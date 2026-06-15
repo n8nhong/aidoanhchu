@@ -208,7 +208,7 @@ app.get("/api/auto-publish/stream", async (req, res) => {
         
         // --- XỬ LÝ ẢNH CHỐNG LỖI 403 (HOTLINKING) ---
         // Nếu imageUrl vẫn là link Shopee gốc (nghĩa là AI ảnh không chạy hoặc lỗi), tải lên Supabase để chống 403
-        if (imageUrl && imageUrl.includes('shopee.vn') || imageUrl.includes('susercontent.com')) {
+        if (imageUrl && (imageUrl.includes('shopee.vn') || imageUrl.includes('susercontent.com'))) {
            try {
              sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tải ảnh gốc từ Shopee lên máy chủ để chống lỗi hiển thị...` });
              const imgFetch = await fetch(imageUrl);
@@ -310,6 +310,33 @@ app.get("/api/auto-publish/stream", async (req, res) => {
       tmpDbData = { ...tmpDbData, ...req.body };
       saveToDisk();
       res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // API Route: Fetch affiliate products from Supabase
+  app.get("/api/affiliate-products", async (req, res) => {
+    try {
+      const qUrl = (req.query.url as string || '').trim() || globalSupabaseConfig.url;
+      const qKey = (req.query.key as string || '').trim() || globalSupabaseConfig.key;
+
+      if (!qUrl || !qKey) {
+        return res.status(400).json({ error: 'Missing Supabase credentials' });
+      }
+
+      const supabase = createClient(qUrl, qKey);
+      const { data, error } = await supabase
+        .from('affiliate_products')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (error) {
+        return res.status(500).json({ error: error.message });
+      }
+
+      res.json(data || []);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
