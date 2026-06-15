@@ -6,17 +6,16 @@
  * @param referenceImageUrl Existing image URL (optional, can be used as init image).
  * @returns URL of the generated image (hosted by Replicate).
  */
-export async function generateBackgroundImage(productTitle: string, referenceImageUrl?: string): Promise<string> {
+export async function generateBackgroundImage(promptInput: string, referenceImageUrl?: string): Promise<string> {
   const REPLICATE_TOKEN = process.env.REPLICATE_API_TOKEN;
   if (!REPLICATE_TOKEN) {
     throw new Error('REPLICATE_API_TOKEN is not set in environment');
   }
 
-  const prompt = `${productTitle}, high‑resolution product photo on clean white background, realistic, no extra accessories`;
   const body: any = {
     version: '8f7b9dad6b2c76a4f3e6c76d0fb49c1a45191b5a4fb2d2360e60e6f1a1514b24', // Stable Diffusion v1.5 (example)
     input: {
-      prompt,
+      prompt: promptInput,
       width: 512,
       height: 512,
       num_inference_steps: 50,
@@ -24,10 +23,11 @@ export async function generateBackgroundImage(productTitle: string, referenceIma
     }
   };
 
-  // If a reference image is provided, use img2img (this is a simplified example)
+  // If a reference image is provided, use img2img
   if (referenceImageUrl) {
     body.input.image = referenceImageUrl;
-    body.input.task = 'img2img';
+    // prompt_strength < 1 to keep original structure. 0.5 allows background change while keeping subject mostly recognizable.
+    body.input.prompt_strength = 0.55; 
   }
 
   const response = await fetch('https://api.replicate.com/v1/predictions', {

@@ -484,7 +484,11 @@ export function AdminDashboard({
     setApProgress({ current: 0, total: apCount });
 
     try {
-      const source = new EventSource(`/api/auto-publish/stream?limit=${apCount}&url=${encodeURIComponent(url)}&key=${encodeURIComponent(key)}`);
+      // Lấy Gemini key đang hoạt động
+      const activeGeminiKey = geminiKeys?.find((k: any) => k.isActive) || geminiKeys?.[0];
+      const geminiKeyStr = activeGeminiKey ? activeGeminiKey.key : '';
+
+      const source = new EventSource(`/api/auto-publish/stream?limit=${apCount}&url=${encodeURIComponent(url)}&key=${encodeURIComponent(key)}&geminiKey=${encodeURIComponent(geminiKeyStr)}`);
       
       source.onmessage = (event) => {
         const data = JSON.parse(event.data);

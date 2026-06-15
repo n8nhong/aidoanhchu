@@ -78,7 +78,7 @@ app.get("/api/auto-publish/stream", async (req, res) => {
     
     sendEvent({ type: 'log', message: 'Bắt đầu cào dữ liệu từ Shopee...' });
     const rawProducts = await fetchShopeeProducts();
-    let filtered = rawProducts.filter(p => (p.salesCount || 0) > 1000 && (p.commissionRate || 0) >= 12);
+    let filtered = rawProducts.filter(p => (p.salesCount || 0) > 1000 && (p.commissionRate || 0) >= 10);
     if (filtered.length === 0) {
       sendEvent({ type: 'log', message: '⚠️ Không có sản phẩm thỏa mãn tiêu chí, sẽ dùng toàn bộ dữ liệu thu thập được.' });
       filtered = rawProducts.slice(0, limit);
@@ -91,6 +91,7 @@ app.get("/api/auto-publish/stream", async (req, res) => {
 
     const qUrl = (req.query.url as string || '').trim();
     const qKey = (req.query.key as string || '').trim();
+    const geminiKey = (req.query.geminiKey as string || '').trim();
     
     const finalUrl = qUrl || globalSupabaseConfig.url || '';
     const finalKey = qKey || globalSupabaseConfig.key || '';
@@ -110,85 +111,123 @@ app.get("/api/auto-publish/stream", async (req, res) => {
       const prod = toProcess[i];
       try {
         sendEvent({ type: 'progress', current: i + 1, total: toProcess.length, message: `Đang xử lý: ${prod.title.substring(0, 40)}...` });
-        
-        sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tạo nội dung AI cho sản phẩm...` });
-        const contentRes = await generateProductContent({
-          productName: prod.title,
-          rawLinkInput: prod.link,
-          categoryId: prod.categoryId,
-          extraInfo: prod.extraInfo,
-          productImageBase64: ''
-        });
 
-        sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tạo ảnh nền bằng Stable Diffusion...` });
-        let imageBase64 = '';
-        try {
-          imageBase64 = await generateBackgroundImage({ prompt: contentRes.imageKeyword });
-        } catch (imgErr: any) {
-           sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lỗi tạo ảnh (bỏ qua): ${imgErr.message}` });
-        }
+        let description = prod.extraInfo 
+          ? `${prod.extraInfo}. Đã bán ${prod.salesCount}+ đơn trên Shopee. Hoa hồng ${prod.commissionRate}%.`
+          : `Sản phẩm hot với ${prod.salesCount}+ lượt bán trên Shopee. Hoa hồng ${prod.commissionRate}%.`;
+        let finalTitle = prod.title;
+        let finalPrice = prod.price || 0;
+        let finalOriginalPrice = Math.round((prod.price || 0) * 1.3);
 
-        let imageUrl = '';
-        if (imageBase64) {
-          sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tải ảnh lên Supabase Storage...` });
-          const fileExt = 'png';
-          const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 8)}.${fileExt}`;
-          const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, Buffer.from(imageBase64, 'base64'));
-          
-          if (uploadError) {
-            sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lỗi tải ảnh lên: ${uploadError.message}` });
-          } else {
-            const { publicURL } = supabase.storage.from('product-images').getPublicUrl(fileName);
-            imageUrl = publicURL || '';
+        let imageUrl = prod.imageUrl || '';
+
+        // Tích hợp AI (nếu có key)
+        if (geminiKey) {
+          try {
+            sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tạo nội dung AI cho sản phẩm...` });
+            const contentRes = await generateProductContent({
+              apiKey: geminiKey,
+              productName: prod.title,
+              rawLinkInput: prod.link,
+              categoryId: prod.categoryId,
+              extraInfo: prod.extraInfo,
+              price: prod.price
+            });
+
+            finalTitle = contentRes.title || finalTitle;
+            description = contentRes.description || description;
+            finalPrice = contentRes.price || finalPrice;
+            finalOriginalPrice = contentRes.originalPrice || finalOriginalPrice;
+
+            if (contentRes.imageKeyword && prod.imageUrl) {
+              sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tạo ảnh nền bằng Stable Diffusion...` });
+              try {
+                const imageBase64 = await generateBackgroundImage(contentRes.imageKeyword, prod.imageUrl);
+                if (imageBase64) {
+                   // GenerateBackgroundImage actually returns a URL (replicate URL), but wait, the previous code expected base64.
+                   // Let's check stableDiffusion.ts. It returns a URL string if it's from Replicate.
+                   // So imageBase64 is actually an imageUrl.
+                   
+                   sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tải ảnh AI về máy và tải lên Supabase Storage...` });
+                   const imgFetch = await fetch(imageBase64);
+                   if (imgFetch.ok) {
+                     const imgBuffer = await imgFetch.arrayBuffer();
+                     const fileExt = 'png';
+                     const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 8)}.${fileExt}`;
+                     const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, imgBuffer, { contentType: 'image/png' });
+                     
+                     if (uploadError) {
+                       sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lỗi tải ảnh lên Supabase: ${uploadError.message}` });
+                     } else {
+                       const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
+                       imageUrl = data.publicUrl || imageBase64;
+                     }
+                   } else {
+                     imageUrl = imageBase64; // Fallback to replicate URL
+                   }
+                }
+              } catch (imgErr: any) {
+                 sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lỗi tạo ảnh AI (dùng ảnh gốc): ${imgErr.message}` });
+              }
+            }
+          } catch (aiErr: any) {
+             sendEvent({ type: 'error', message: `Lỗi AI: ${aiErr.message}` });
+             // Nếu lỗi do hết Quota, dừng luôn auto publish để người dùng đổi key
+             if (aiErr.message.includes('Quota Exceeded')) {
+               return res.end();
+             }
+             sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Dùng nội dung mặc định do lỗi AI.` });
           }
         }
 
-        sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lưu sản phẩm vào cơ sở dữ liệu...` });
+        // Lưu vào bảng affiliate_products (hiển thị trên trang chủ)
+        sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lưu sản phẩm vào affiliate_products...` });
+        const productId = `sp_${Date.now()}_${i}`;
         const { error: dbError } = await supabase.from('affiliate_products').upsert({
-          id: String(Date.now() + i),
-          title: contentRes.title,
-          description: contentRes.description,
+          id: productId,
+          title: finalTitle,
+          description: description,
           image: imageUrl,
-          price: contentRes.price,
-          originalPrice: contentRes.originalPrice,
-          affiliateLink: prod.link,
-          categoryId: autoCategorize(prod.title),
-          soldCount: prod.salesCount || 0,
-          postDate: new Date().toISOString()
-        }, { returning: 'minimal' });
+          price: finalPrice,
+          "originalPrice": finalOriginalPrice,
+          "discountPercent": 23,
+          "affiliateLink": prod.link,
+          "categoryId": prod.categoryId || '1',
+          platform: 'shopee',
+          "soldCount": prod.salesCount || 0,
+          "isSuggested": true,
+          "isDirectProduct": false,
+          "postDate": new Date().toISOString()
+        }, { onConflict: 'id' });
 
         if (dbError) {
-          sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lỗi lưu sản phẩm (products): ${dbError.message}` });
+          sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] ❌ Lỗi lưu affiliate_products: ${dbError.message}` });
         } else {
-          results.push({ title: contentRes.title, status: 'published' });
-          sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] ✅ Đã đăng thành công.` });
+          results.push({ title: finalTitle, status: 'published' });
+          sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] ✅ Đã đăng thành công: ${finalTitle.substring(0, 50)}` });
         }
+
+        // Cũng lưu vào digital_products
+        const { error: dpError } = await supabase.from('digital_products').upsert({
+          id: productId,
+          title: finalTitle,
+          price: finalPrice,
+          "originalPrice": finalOriginalPrice,
+          "isFree": false,
+          "downloadUrl": prod.link,
+          "htmlContent": `<div><h2>${finalTitle}</h2><p>${description}</p><a href="${prod.link}" target="_blank">Mua ngay trên Shopee</a></div>`,
+          "isShowOnHome": true,
+          "isSystemGenerated": true,
+          "isPubliclyClaimable": true,
+          "allowedBuyerIds": null
+        }, { onConflict: 'id' });
+
+        if (dpError) {
+          sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] ⚠️ Lỗi lưu digital_products: ${dpError.message}` });
+        }
+
       } catch (prodErr: any) {
         sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] ❌ Bỏ qua sản phẩm do lỗi: ${prodErr.message}` });
-      }
-    }
-
-    sendEvent({ type: 'log', message: `Đang đồng bộ dữ liệu vào bảng digital_products...` });
-    const onlineProducts = toProcess.map((p, idx) => ({
-      id: String(Date.now() + 1000 + idx),
-      title: p.title,
-      price: p.price,
-      originalPrice: p.originalPrice || 0,
-      isFree: false,
-      downloadUrl: null,
-      htmlContent: null,
-      isShowOnHome: true,
-      isSystemGenerated: true,
-      isPubliclyClaimable: true,
-      allowedBuyerIds: null
-    }));
-    
-    if (onlineProducts.length > 0) {
-      const { error: opError } = await supabase.from('digital_products').upsert(onlineProducts, { returning: 'minimal' });
-      if (opError) {
-        sendEvent({ type: 'log', message: `Lỗi đồng bộ online_products: ${opError.message}` });
-      } else {
-        sendEvent({ type: 'log', message: `Đã đồng bộ ${onlineProducts.length} sản phẩm vào online_products.` });
       }
     }
 
