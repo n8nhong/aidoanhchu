@@ -5911,12 +5911,16 @@ export function AdminDashboard({
 
 CREATE INDEX IF NOT EXISTS idx_affiliate_products_created ON public.affiliate_products(created_at DESC);
 
+-- Nếu table đã tồn tại, thêm các columns thiếu
+ALTER TABLE public.affiliate_products ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+ALTER TABLE public.affiliate_products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+
 ALTER TABLE public.affiliate_products ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow ALL" ON public.affiliate_products FOR ALL USING (true) WITH CHECK (true);`;
                   navigator.clipboard.writeText(sql);
                   alert('✅ Đã copy SQL tạo affiliate_products! Dán vào SQL Editor rồi bấm Run.');
-                }}
+                }}}
                 className="absolute top-2 right-12 bg-orange-700 hover:bg-orange-600 text-white px-2 py-0.5 rounded text-[9px] cursor-pointer"
               >
                 📌 Copy Affiliate SQL
@@ -5969,12 +5973,18 @@ CREATE TABLE IF NOT EXISTS public.affiliate_products (
   description text,
   "isSuggested" boolean,
   "isDirectProduct" boolean,
-  "postDate" text
+  "postDate" text,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
 );
 
 insert into storage.buckets (id, name, public) values ('product-images', 'product-images', true) on conflict (id) do nothing;
 create policy "Allow public read access on product-images" on storage.objects for select using ( bucket_id = 'product-images' );
 create policy "Allow all uploads on product-images" on storage.objects for insert with check ( bucket_id = 'product-images' );
+
+-- Nếu table đã tồn tại, thêm các columns thiếu
+ALTER TABLE public.affiliate_products ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+ALTER TABLE public.affiliate_products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
 
 ALTER TABLE public.buyers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.digital_products ENABLE ROW LEVEL SECURITY;
@@ -6041,7 +6051,9 @@ CREATE TABLE IF NOT EXISTS public.affiliate_products (
   description text,
   "isSuggested" boolean,
   "isDirectProduct" boolean,
-  "postDate" text
+  "postDate" text,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Tự động tạo Storage Bucket để chứa ảnh
@@ -6056,6 +6068,10 @@ create policy "Allow public read access on product-images"
 create policy "Allow all uploads on product-images"
   on storage.objects for insert
   with check ( bucket_id = 'product-images' );
+
+-- Nếu table đã tồn tại, thêm các columns thiếu
+ALTER TABLE public.affiliate_products ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+ALTER TABLE public.affiliate_products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
 
 -- Bật RLS và cấp quyền Public (Cho phép tải dễ dàng)
 ALTER TABLE public.buyers ENABLE ROW LEVEL SECURITY;

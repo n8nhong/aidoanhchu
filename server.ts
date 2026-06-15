@@ -413,15 +413,28 @@ CREATE INDEX IF NOT EXISTS idx_affiliate_products_created ON affiliate_products(
       }
 
       const supabase = createClient(qUrl, qKey);
-      const { data, error } = await supabase
+      
+      // Try with created_at first, if fails, try without ordering
+      let { data, error } = await supabase
         .from('affiliate_products')
         .select('*')
-        .order('created_at', { ascending: false })
         .limit(100);
 
+      // If error, try to get all data without ordering
       if (error) {
-        console.error('❌ [affiliate-products] Supabase Error:', error.message);
-        return res.status(500).json({ error: error.message });
+        console.warn('⚠️ [affiliate-products] Query error:', error.message);
+        
+        // Try a simpler query without ORDER BY
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from('affiliate_products')
+          .select('*');
+        
+        if (fallbackError) {
+          console.error('❌ [affiliate-products] Fallback Error:', fallbackError.message);
+          return res.status(500).json({ error: fallbackError.message });
+        }
+        
+        data = fallbackData;
       }
 
       console.log('✅ [affiliate-products] Fetched', data?.length || 0, 'items');
