@@ -404,7 +404,11 @@ CREATE INDEX IF NOT EXISTS idx_affiliate_products_created ON affiliate_products(
       const qUrl = (req.query.url as string || '').trim() || globalSupabaseConfig.url;
       const qKey = (req.query.key as string || '').trim() || globalSupabaseConfig.key;
 
+      console.log('📡 [affiliate-products] URL:', qUrl);
+      console.log('📡 [affiliate-products] Key:', qKey ? qKey.substring(0, 20) + '...' : 'MISSING');
+
       if (!qUrl || !qKey) {
+        console.error('❌ [affiliate-products] Missing Supabase credentials');
         return res.status(400).json({ error: 'Missing Supabase credentials' });
       }
 
@@ -416,11 +420,14 @@ CREATE INDEX IF NOT EXISTS idx_affiliate_products_created ON affiliate_products(
         .limit(100);
 
       if (error) {
+        console.error('❌ [affiliate-products] Supabase Error:', error.message);
         return res.status(500).json({ error: error.message });
       }
 
+      console.log('✅ [affiliate-products] Fetched', data?.length || 0, 'items');
       res.json(data || []);
     } catch (e: any) {
+      console.error('❌ [affiliate-products] Exception:', e.message);
       res.status(500).json({ error: e.message });
     }
   });

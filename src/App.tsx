@@ -249,11 +249,17 @@ export default function App() {
 
       if (url && key) {
         try {
+          console.log('📡 Fetching from server...');
+          
           const [digRes, affRes, giftRes] = await Promise.all([
             fetch(`${url}/rest/v1/digital_products`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' }),
-            fetch(`${url}/rest/v1/affiliate_products?order=created_at.desc&limit=100`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' }),
+            fetch(`/api/affiliate-products?url=${encodeURIComponent(url)}&key=${encodeURIComponent(key)}`, { cache: 'no-store' }),
             fetch(`${url}/rest/v1/gifts`, { headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }, cache: 'no-store' })
           ]);
+
+          console.log('✅ Digital Products Response:', digRes.status, digRes.statusText);
+          console.log('✅ Affiliate Products Response:', affRes.status, affRes.statusText);
+          console.log('✅ Gifts Response:', giftRes.status, giftRes.statusText);
 
           let fetchedSiteConfigStr = null;
 
@@ -281,6 +287,7 @@ export default function App() {
 
           if (affRes.ok) {
              const affData = await affRes.json();
+             console.log('📦 Affiliate Products Data:', affData);
              if (affData && affData.length > 0) {
                  const normalizedAff = affData.map((p: any) => ({
                      ...p,
@@ -294,16 +301,20 @@ export default function App() {
                      isDirectProduct: p.isDirectProduct !== undefined ? p.isDirectProduct : p.isdirectproduct,
                      postDate: p.postDate || p.postdate
                  }));
+                 console.log('✅ Affiliate Products Loaded:', normalizedAff.length, 'items');
                  if (!expressDbData.affili_products || normalizedAff.length >= expressDbData.affili_products.length) {
                     setProducts(normalizedAff);
                     localStorage.setItem('affili_products', JSON.stringify(normalizedAff));
                  }
+             } else {
+               console.log('⚠️ Affiliate products is empty or not an array');
              }
           } else {
              // Log error if affiliate_products table has issues
-             console.warn('Lỗi fetch affiliate_products:', affRes.status);
+             console.error('❌ Lỗi fetch affiliate_products - Status:', affRes.status);
              const affErrorText = await affRes.text();
-             console.log('Lỗi chi tiết:', affErrorText);
+             console.error('❌ Lỗi chi tiết:', affErrorText);
+             console.error('❌ Fetch URL:', `/api/affiliate-products`);
           }
 
           if (giftRes.ok) {
