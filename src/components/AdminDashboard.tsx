@@ -53,19 +53,11 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSlidesForTopic } from '../utils/giftSlidesData';
-import { readCSVFile, parseCSV, parsePrice, validateShopeeLink, fetchShopeeImage } from '../utils/csvProcessor';
+import { readCSVFile, parseCSV, parsePrice, validateShopeeLink, fetchShopeeImage, fetchShopeeProductDetails } from '../utils/csvProcessor';
 import { PRESET_BACKGROUNDS, processProductImageWithNewBackground, processProductImageWithSceneBackground, dataUrlToFile } from '../utils/imageProcessor';
 import { generateProductContent } from '../utils/geminiClient';
 import { autoCategorize, isIndustryCategoryId, normalizeCategoryId, INDUSTRY_CATEGORY_NAMES } from '../utils/autoCategorize';
 import { getSceneBackgroundForCategory } from '../utils/categoryScenes';
-import {
-  processProductImageLocal,
-  isLocalImageServiceAvailable,
-  checkLocalImageService,
-  getLocalSdUrl,
-  setLocalSdUrl,
-  type LocalImageHealth,
-} from '../utils/localImageGen';
 import { ImageUploadModal } from './ImageUploadModal';
 
 // compressImage is now imported from ../utils
@@ -478,39 +470,13 @@ export function AdminDashboard({
     total: 0,
     message: ''
   });
-  const [localSdUrl, setLocalSdUrlState] = useState(() => getLocalSdUrl());
-  const [localSdHealth, setLocalSdHealth] = useState<LocalImageHealth | null>(null);
 
-  /** Kiểm tra GPU local có sẵn sàng không */
-  const refreshLocalSdHealth = async () => {
-    const health = await checkLocalImageService(localSdUrl);
-    setLocalSdHealth(health);
-    return health;
-  };
-
-  useEffect(() => {
-    refreshLocalSdHealth();
-    const interval = setInterval(refreshLocalSdHealth, 15000);
-    return () => clearInterval(interval);
-  }, [localSdUrl]);
-
-  /** Xử lý ảnh: ưu tiên GPU local, fallback ghép nền cảnh canvas */
   const processProductImageSmart = async (
     sourceImageUrl: string,
     industryCategoryId: string,
     productName: string,
     imagePrompt?: string
   ): Promise<string> => {
-    const localOk = await isLocalImageServiceAvailable(localSdUrl);
-    if (localOk) {
-      return processProductImageLocal({
-        imageUrl: sourceImageUrl,
-        prompt: imagePrompt,
-        categoryId: industryCategoryId,
-        productName,
-        baseUrl: localSdUrl,
-      });
-    }
     const sceneUrl = getSceneBackgroundForCategory(industryCategoryId);
     return csvConfig.backgroundMode === 'scene'
       ? processProductImageWithSceneBackground(sourceImageUrl, sceneUrl)
@@ -658,18 +624,33 @@ export function AdminDashboard({
           }
         }
 
-        // 4️⃣ FETCH IMAGE + GPU LOCAL TẠO NỀN
+        // 4️⃣ FETCH IMAGE + PROCESS WITH BACKGROUND
         let imageUrl = '';
         setCsvProcessing({
           isProcessing: true,
           currentIndex: i + 1,
           total: csvProducts.length,
-          message: `🎨 [${i + 1}/${csvProducts.length}] GPU tạo ảnh: ${product.itemName.substring(0, 30)}...`
+          message: `🎨 [${i + 1}/${csvProducts.length}] Lấy ảnh Shopee: ${product.itemName.substring(0, 30)}...`
         });
 
         try {
-          let shopeeImageUrl = await fetchShopeeImage(product.offerLink || product.productLink);
-          
+          const shopeeDetails = await fetchShopeeProductDetails(product.offerLink || product.productLink);
+          let shopeeImageUrl = shopeeDetails?.mainImage || shopeeDetails?.images?.[0] || '';
+
+          if (shopeeDetails && shopeeDetails.description) {
+            if (!aiDescription || aiDescription === product.itemName || aiDescription.length < 120) {
+              aiDescription = shopeeDetails.description;
+            }
+          }
+
+          if (!imagePrompt) {
+            imagePrompt = `${product.itemName}, high-resolution product photo, placed on a beautiful background, realistic, masterpiece, highly detailed`;
+          }
+
+          if (!shopeeImageUrl) {
+            shopeeImageUrl = await fetchShopeeImage(product.offerLink || product.productLink);
+          }
+
           if (shopeeImageUrl) {
             try {
               const processedImageDataUrl = await processProductImageSmart(
@@ -685,7 +666,6 @@ export function AdminDashboard({
               );
 
               imageUrl = await uploadImageToSupabase(imageFile) || '';
-              
             } catch (bgErr) {
               console.warn('Lỗi xử lý ảnh:', bgErr);
               try {
@@ -764,17 +744,7 @@ export function AdminDashboard({
       return;
     }
 
-    if (!window.confirm(`Sẽ cải thiện ${targets.length} sản phẩm (GPU local tạo ảnh + mô tả Gemini + phân loại). Tiếp tục?`)) return;
-
-    const localOk = await isLocalImageServiceAvailable(localSdUrl);
-    if (!localOk) {
-      const proceed = window.confirm(
-        '⚠️ Máy tạo ảnh GPU local chưa chạy!\n\n' +
-        'Chạy file may-tao-anh-ai\\start.bat trước để dùng RTX 3060.\n' +
-        'Nếu tiếp tục, hệ thống sẽ dùng ghép nền cảnh cơ bản (chất lượng thấp hơn).\n\nBạn có muốn tiếp tục?'
-      );
-      if (!proceed) return;
-    }
+    if (!window.confirm(`Sẽ cải thiện ${targets.length} sản phẩm (mô tả Gemini + phân loại). Tiếp tục?`)) return;
 
     const validKeys = (geminiKeys || []).filter((k: any) => k.key?.trim()).map((k: any) => k.key.trim());
     let successCount = 0;
@@ -815,11 +785,10 @@ export function AdminDashboard({
           }
         }
 
-        // Tải & xử lý ảnh bằng GPU local
         const needsImage = !imageUrl || imageUrl.includes('shopee') || imageUrl.includes('susercontent.com');
         if (needsImage && item.affiliateLink) {
           try {
-            setEnhanceProcessing(prev => ({ ...prev, message: `[${i + 1}/${targets.length}] 🎨 GPU tạo ảnh nền...` }));
+            setEnhanceProcessing(prev => ({ ...prev, message: `[${i + 1}/${targets.length}] 🎨 Xử lý ảnh nền...` }));
             const shopeeImageUrl = await fetchShopeeImage(item.affiliateLink);
             if (shopeeImageUrl) {
               const processed = await processProductImageSmart(
@@ -5460,41 +5429,6 @@ export function AdminDashboard({
               Tải file CSV → Tự động điền thông tin sản phẩm → Đăng bài hàng loạt
             </p>
 
-            {/* GPU Local Status */}
-            <div className={`mb-6 p-4 rounded-lg border-2 ${localSdHealth?.status === 'ok' ? 'bg-emerald-50 border-emerald-300' : 'bg-amber-50 border-amber-300'}`}>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="font-bold text-sm flex items-center gap-2">
-                    🖥️ Máy tạo ảnh GPU Local (RTX 3060)
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${localSdHealth?.status === 'ok' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'}`}>
-                      {localSdHealth?.status === 'ok' ? 'ĐANG CHẠY' : 'CHƯA KẾT NỐI'}
-                    </span>
-                  </h3>
-                  {localSdHealth?.status === 'ok' ? (
-                    <p className="text-xs text-emerald-800 mt-1">
-                      GPU: {localSdHealth.gpu} ({localSdHealth.vram_gb}GB VRAM) — ảnh tạo trên máy bạn, upload lên Supabase
-                    </p>
-                  ) : (
-                    <p className="text-xs text-amber-800 mt-1">
-                      Chạy <code className="bg-white px-1 rounded">may-tao-anh-ai\install.bat</code> lần đầu, sau đó <code className="bg-white px-1 rounded">may-tao-anh-ai\start.bat</code> mỗi khi xử lý ảnh
-                    </p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={localSdUrl}
-                    onChange={(e) => setLocalSdUrlState(e.target.value)}
-                    onBlur={() => { setLocalSdUrl(localSdUrl); refreshLocalSdHealth(); }}
-                    className="text-xs border rounded px-2 py-1 w-44"
-                    placeholder="http://127.0.0.1:8765"
-                  />
-                  <button type="button" onClick={refreshLocalSdHealth} className="text-xs px-2 py-1 bg-white border rounded font-bold hover:bg-gray-50">
-                    🔄
-                  </button>
-                </div>
-              </div>
-            </div>
 
             <div className="space-y-6">
               {/* File Upload */}
