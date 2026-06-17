@@ -41,16 +41,14 @@ if errorlevel 1 (
 
 echo ==== Git commit + push ====
 %GIT_CMD% add .
-%GIT_CMD% commit -m "Deploy: %date% %time%"
+%GIT_CMD% commit -m "Deploy: %date% %time%" 2>nul
+
+echo Dang push len GitHub...
+%GIT_CMD% push origin main
 if errorlevel 1 (
-  echo THONG BAO: Khong co file moi de push
-) else (
-  %GIT_CMD% push origin main
-  if errorlevel 1 (
-    echo CANH BAO: Git push that bai. Hay kiem tra GitHub login.
-    pause
-    exit /b 1
-  )
+  echo CANH BAO: Git push that bai. Hay kiem tra GitHub login.
+  pause
+  exit /b 1
 )
 
 echo.
