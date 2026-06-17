@@ -1,7 +1,6 @@
 import express from "express";
-import { fetchShopeeProducts } from "./src/utils/shopeeScraper";
+import { fetchShopeeProducts, fetchShopeeProductDetailsFromUrl } from "./src/utils/shopeeScraper";
 import { generateProductContent } from "./src/utils/geminiClient";
-import { generateBackgroundImage, dataUrlToBuffer } from "./src/utils/stableDiffusion";
 import { autoCategorize } from "./src/utils/autoCategorize";
 import { createClient } from "@supabase/supabase-js";
 import path from "path";
@@ -39,30 +38,7 @@ async function startServer() {
 
   // --- BEGIN SHARED LINK FIX ---
   // Store data persistently during instance lifetime so "tạo rồi chia sẻ link" works
-  // Ensure Supabase storage bucket for product images exists
-async function ensureProductImagesBucket() {
-  if (!globalSupabaseConfig.url || !globalSupabaseConfig.key) return;
-  try {
-    const supabase = createClient(globalSupabaseConfig.url, globalSupabaseConfig.key);
-    // @ts-ignore Supabase storage createBucket may be available in the client
-    const { data, error } = await supabase.storage.createBucket('product-images', { public: true });
-    if (error) {
-      // If bucket already exists, Supabase returns a specific error message
-      if (error.message && error.message.includes('already exists')) {
-        console.log('Bucket product-images already exists.');
-      } else {
-        console.error('Error creating Supabase bucket product-images:', error);
-      }
-    } else {
-      console.log('Supabase bucket product-images created successfully.');
-    }
-  } catch (e) {
-    console.error('Exception while ensuring bucket exists:', e);
-  }
-}
-
-// Call bucket initialization at server start
-ensureProductImagesBucket();
+  // Bucket creation is disabled in Cloud Run deployment to avoid Supabase RLS issues.
 
 // API Route for Auto Publish (Stream)
 app.get("/api/auto-publish/stream", async (req, res) => {
@@ -167,44 +143,7 @@ app.get("/api/auto-publish/stream", async (req, res) => {
             finalPrice = contentRes.price || finalPrice;
             finalOriginalPrice = contentRes.originalPrice || finalOriginalPrice;
 
-            if (contentRes.imageKeyword && prod.imageUrl) {
-              sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tạo ảnh bằng GPU local (RTX 3060)...` });
-              try {
-                const imageResult = await generateBackgroundImage(contentRes.imageKeyword, prod.imageUrl);
-                if (imageResult) {
-                   sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tải ảnh lên Supabase Storage...` });
-
-                   let imgBuffer: ArrayBuffer | Buffer;
-                   let contentType = 'image/jpeg';
-                   let fileExt = 'jpg';
-
-                   if (imageResult.startsWith('data:')) {
-                     const parsed = dataUrlToBuffer(imageResult);
-                     imgBuffer = parsed.buffer;
-                     contentType = parsed.mime;
-                     fileExt = parsed.mime.includes('png') ? 'png' : 'jpg';
-                   } else {
-                     const imgFetch = await fetch(imageResult);
-                     if (!imgFetch.ok) throw new Error('Không tải được ảnh từ URL');
-                     imgBuffer = await imgFetch.arrayBuffer();
-                     contentType = imgFetch.headers.get('content-type') || 'image/jpeg';
-                     fileExt = contentType.includes('png') ? 'png' : 'jpg';
-                   }
-
-                   const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 8)}.${fileExt}`;
-                   const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, imgBuffer, { contentType });
-
-                   if (uploadError) {
-                     sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lỗi tải ảnh lên Supabase: ${uploadError.message}` });
-                   } else {
-                     const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
-                     imageUrl = data.publicUrl || imageResult;
-                   }
-                }
-              } catch (imgErr: any) {
-                 sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lỗi tạo ảnh AI (dùng ảnh gốc): ${imgErr.message}` });
-              }
-            }
+            // Không tạo ảnh AI/ảnh nền nữa, dùng ảnh sản phẩm gốc để đơn giản hóa quy trình.
           } catch (aiErr: any) {
              sendEvent({ type: 'error', message: `Lỗi AI: ${aiErr.message}` });
              // Nếu lỗi do hết Quota, dừng luôn auto publish để người dùng đổi key
@@ -217,23 +156,7 @@ app.get("/api/auto-publish/stream", async (req, res) => {
         
         // --- XỬ LÝ ẢNH CHỐNG LỖI 403 (HOTLINKING) ---
         // Nếu imageUrl vẫn là link Shopee gốc (nghĩa là AI ảnh không chạy hoặc lỗi), tải lên Supabase để chống 403
-        if (imageUrl && (imageUrl.includes('shopee.vn') || imageUrl.includes('susercontent.com'))) {
-           try {
-             sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Tải ảnh gốc từ Shopee lên máy chủ để chống lỗi hiển thị...` });
-             const imgFetch = await fetch(imageUrl);
-             if (imgFetch.ok) {
-               const imgBuffer = await imgFetch.arrayBuffer();
-               const fileName = `shopee_${Date.now()}_${Math.random().toString(36).substr(2, 6)}.jpg`;
-               const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, imgBuffer, { contentType: 'image/jpeg' });
-               if (!uploadError) {
-                 const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
-                 imageUrl = data.publicUrl || imageUrl;
-               }
-             }
-           } catch (dlErr) {
-             console.log('Lỗi tải ảnh gốc Shopee:', dlErr);
-           }
-        }
+        // Original Shopee image URL is used directly; no Supabase upload is performed.
 
         // Lưu vào bảng affiliate_products (hiển thị trên trang chủ)
         sendEvent({ type: 'log', message: `[${i + 1}/${toProcess.length}] Lưu sản phẩm vào affiliate_products...` });
@@ -429,7 +352,7 @@ CREATE INDEX IF NOT EXISTS idx_affiliate_products_created ON affiliate_products(
         .select('*')
         .limit(100);
 
-      // If error, try to get all data without ordering
+      // If error, try to get all data without ORDER BY
       if (error) {
         console.warn('⚠️ [affiliate-products] Query error:', error.message);
         
@@ -451,6 +374,24 @@ CREATE INDEX IF NOT EXISTS idx_affiliate_products_created ON affiliate_products(
     } catch (e: any) {
       console.error('❌ [affiliate-products] Exception:', e.message);
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get('/api/shopee-detail', async (req, res) => {
+    try {
+      const productLink = (req.query.url as string || '').trim();
+      if (!productLink) {
+        return res.status(400).json({ error: 'Missing Shopee product URL' });
+      }
+
+      const detail = await fetchShopeeProductDetailsFromUrl(productLink);
+      if (!detail) {
+        return res.status(404).json({ error: 'Không lấy được chi tiết từ Shopee' });
+      }
+      res.json(detail);
+    } catch (error: any) {
+      console.error('❌ /api/shopee-detail error:', error?.message || error);
+      res.status(500).json({ error: error?.message || 'Error fetching Shopee detail' });
     }
   });
   // --- END SHARED LINK FIX ---
@@ -521,35 +462,6 @@ CREATE INDEX IF NOT EXISTS idx_affiliate_products_created ON affiliate_products(
       res.json({ success: true, license: lic });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
-    }
-  });
-
-  const LOCAL_SD_URL = process.env.LOCAL_SD_URL || 'http://127.0.0.1:8765';
-
-  // Proxy tới máy tạo ảnh GPU local (RTX 3060) — chạy local-ai/start.bat
-  app.get('/api/local-image/health', async (_req, res) => {
-    try {
-      const r = await fetch(`${LOCAL_SD_URL}/health`, { signal: AbortSignal.timeout(4000) });
-      const data = await r.json();
-      res.json(data);
-    } catch {
-      res.status(503).json({ status: 'offline', message: 'Chạy local-ai/start.bat trên máy có GPU' });
-    }
-  });
-
-  app.post('/api/local-image/process', async (req, res) => {
-    try {
-      const r = await fetch(`${LOCAL_SD_URL}/process`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req.body),
-        signal: AbortSignal.timeout(180000),
-      });
-      const data = await r.json();
-      if (!r.ok) return res.status(r.status).json(data);
-      res.json(data);
-    } catch (e: any) {
-      res.status(503).json({ error: e.message || 'Local AI không phản hồi. Hãy chạy local-ai/start.bat' });
     }
   });
 

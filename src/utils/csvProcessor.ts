@@ -73,15 +73,15 @@ export const extractProductIdFromLink = (link: string): string | null => {
  */
 export const parsePrice = (priceStr: string): number => {
   const cleaned = priceStr.replace(/[^\d.]/g, '');
-  const num = parseFloat(cleaned);
-  
-  if (priceStr.includes('k') || priceStr.includes('K')) {
+  const num = parseFloat(cleaned) || 0;
+
+  if (priceStr.toLowerCase().includes('k')) {
     return Math.round(num * 1000);
   }
-  if (priceStr.includes('m') || priceStr.includes('M')) {
+  if (priceStr.toLowerCase().includes('m')) {
     return Math.round(num * 1000000);
   }
-  
+
   return Math.round(num);
 };
 
@@ -95,13 +95,121 @@ export const formatPrice = (price: number): string => {
 /**
  * Xác thực link Shopee có hợp lệ không
  */
+const resolveShopeeRedirect = async (link: string): Promise<string> => {
+  try {
+    const url = new URL(link.trim());
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === 's.shopee.vn' || hostname === 'shp.ee') {
+      const res = await fetch(link, { method: 'GET', redirect: 'follow' });
+      return res.url || link;
+    }
+  } catch {
+    return link;
+  }
+  return link;
+};
+
+const extractShopeeIdsFromUrl = (link: string): { shopId?: string; itemId?: string } => {
+  try {
+    const url = new URL(link.trim());
+    const search = url.searchParams;
+    const pathname = url.pathname;
+
+    // E.g. https://shopee.vn/...-i.shopId.itemId
+    const directMatch = pathname.match(/-i\.(\d+)\.(\d+)/);
+    if (directMatch) {
+      return { shopId: directMatch[1], itemId: directMatch[2] };
+    }
+
+    // E.g. https://shopee.vn/product/shopId/itemId
+    const productPathMatch = pathname.match(/\/product\/(\d+)\/(\d+)/);
+    if (productPathMatch) {
+      return { shopId: productPathMatch[1], itemId: productPathMatch[2] };
+    }
+
+    // Some affiliate / offer URLs include query parameters
+    const itemId = search.get('itemid') || search.get('item_id') || search.get('product_id');
+    const shopId = search.get('shopid') || search.get('shop_id');
+    if (itemId && shopId) {
+      return { shopId, itemId };
+    }
+
+    // Fallback to regex on the full link string for other shapes
+    const normalized = link.replace(/https?:\/\//gi, '').replace(/www\./gi, '');
+    const patterns: Array<RegExp> = [
+      /-i\.(\d+)\.(\d+)/,
+      /\/product\/(\d+)\/(\d+)/,
+      /itemid=(\d+).*?shopid=(\d+)/,
+      /shopid=(\d+).*?itemid=(\d+)/
+    ];
+
+    for (const pattern of patterns) {
+      const match = normalized.match(pattern);
+      if (match) {
+        if (pattern.source.includes('itemid=') && pattern.source.startsWith('itemid')) {
+          return { shopId: match[2], itemId: match[1] };
+        }
+        if (pattern.source.includes('itemid=') && pattern.source.startsWith('shopid')) {
+          return { shopId: match[1], itemId: match[2] };
+        }
+        return { shopId: match[1], itemId: match[2] };
+      }
+    }
+  } catch {
+    // Ignore invalid URLs and fall through to return empty object
+  }
+
+  return {};
+};
+
+export interface ShopeeProductDetail {
+  title: string;
+  price: number;
+  originalPrice: number;
+  images: string[];
+  mainImage: string;
+  description: string;
+  sales: number;
+  rating: number;
+  shop: string;
+  category: string;
+  link: string;
+}
+
+export const fetchShopeeProductDetails = async (productLink: string): Promise<ShopeeProductDetail | null> => {
+  try {
+    if (!productLink) return null;
+    const endpoint = `/api/shopee-detail?url=${encodeURIComponent(productLink.trim())}`;
+    const response = await fetch(endpoint, {
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+    if (!response.ok) {
+      console.warn('Shopee detail proxy returned lỗi:', response.status);
+      return null;
+    }
+    const data = await response.json();
+    return data || null;
+  } catch (error) {
+    console.error('Lỗi fetchShopeeProductDetails:', error);
+    return null;
+  }
+};
+
 export const validateShopeeLink = (link: string): boolean => {
   if (!link) return false;
   try {
-    const url = new URL(link);
+    const url = new URL(link.trim());
+    const hostname = url.hostname.toLowerCase();
+    const validShort = ['s.shopee.vn', 'shp.ee'];
     const validDomains = ['shopee.vn', 'shopee.com', 'affiliate.shopee.vn'];
-    return validDomains.some(domain => url.hostname.includes(domain)) && 
-           url.pathname.includes('/product/');
+
+    if (validShort.includes(hostname)) return true;
+    if (!validDomains.some(domain => hostname.includes(domain))) return false;
+
+    const path = url.pathname;
+    return path.includes('/product/') || /-i\.\d+\.\d+/.test(path) || /itemid=\d+/.test(url.search);
   } catch {
     return false;
   }
@@ -129,35 +237,14 @@ export const createStoreSlug = (shopName: string): string => {
  */
 export const fetchShopeeImage = async (productLink: string): Promise<string> => {
   try {
-    // Nếu là affiliate link, chuyển thành product link
-    const link = productLink.replace('affiliate.shopee.vn', 'shopee.vn');
-    
-    // Trích xuất product ID
-    const match = link.match(/\/product\/(\d+)/);
-    if (!match) return '';
-    
-    const productId = match[1];
-    
-    // Sử dụng Shopee API để lấy thông tin sản phẩm và ảnh
-    const shopMatch = link.match(/\/shop\/([a-zA-Z0-9_-]+)/);
-    if (!shopMatch) return '';
-    
-    const shopId = shopMatch[1];
-    
-    // API endpoint để lấy product detail
-    const apiUrl = `https://shopee.vn/api/v2/product/get_product_detail?product_id=${productId}&shop_id=${shopId}`;
-    
-    const response = await fetch(apiUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
-    
-    if (!response.ok) return '';
-    
-    const data = await response.json();
-    const imageUrl = data?.data?.product?.image;
-    return imageUrl || '';
+    const shopeeDetails = await fetchShopeeProductDetails(productLink);
+    if (shopeeDetails?.mainImage) {
+      return shopeeDetails.mainImage;
+    }
+    if (shopeeDetails?.images?.length) {
+      return shopeeDetails.images[0];
+    }
+    return '';
   } catch (error) {
     console.error('Lỗi tải ảnh từ Shopee:', error);
     return '';

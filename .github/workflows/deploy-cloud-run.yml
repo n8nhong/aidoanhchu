@@ -4,14 +4,33 @@ on:
   push:
     branches:
       - main
+      - master
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build application
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Authenticate to Google Cloud
         id: auth
@@ -19,14 +38,37 @@ jobs:
         with:
           credentials_json: '${{ secrets.GCP_CREDENTIALS }}'
 
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker asia-southeast1-docker.pkg.dev
+
+      - name: Build and push Docker image
+        run: |
+          gcloud builds submit . \
+            --tag asia-southeast1-docker.pkg.dev/hocaimienphi/cloud-run-source-deploy/aidoanhchu:latest \
+            --project hocaimienphi \
+            --region asia-southeast1
+
       - name: Deploy to Cloud Run
         id: deploy
-        uses: google-github-actions/deploy-cloudrun@v2
-        with:
-          service: aidoanhchu
-          source: .
-          region: asia-southeast1
-          flags: '--allow-unauthenticated'
+        run: |
+          gcloud run deploy aidoanhchu \
+            --image asia-southeast1-docker.pkg.dev/hocaimienphi/cloud-run-source-deploy/aidoanhchu:latest \
+            --region asia-southeast1 \
+            --platform managed \
+            --allow-unauthenticated \
+            --project hocaimienphi
 
-      - name: Show output URL
-        run: echo "App deployed to ${{ steps.deploy.outputs.url }}"
+      - name: Get service URL
+        run: |
+          SERVICE_URL=$(gcloud run services describe aidoanhchu \
+            --region asia-southeast1 \
+            --platform managed \
+            --project hocaimienphi \
+            --format='value(status.url)')
+          echo "✅ Deployed at: $SERVICE_URL"
+          echo "Dashboard: https://console.cloud.google.com/run/detail/asia-southeast1/aidoanhchu/revisions?project=hocaimienphi"
+

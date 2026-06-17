@@ -16,9 +16,10 @@ from typing import Optional
 
 import requests
 import torch
+import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageFilter
 from pydantic import BaseModel
 
 app = FastAPI(title="Affilishop Local Image AI", version="1.0.0")
@@ -105,23 +106,82 @@ def remove_background(img: Image.Image) -> Image.Image:
 
 
 def build_prompt(req: ProcessRequest) -> str:
+    # NEVER include product name in background generation prompt
     if req.prompt and req.prompt.strip():
         return req.prompt.strip()
     cat_prompt = CATEGORY_PROMPTS.get(str(req.category_id or "1"), DEFAULT_PROMPT)
-    name = (req.product_name or "").strip()
-    if name:
-        return f"{name}, product photo, {cat_prompt}, keep product intact, no text, no watermark"
-    return cat_prompt
+    # Force background-only instruction with richer scene details
+    # Explicitly forbid clothing/garments so the background won't become a shirt
+    return f"{cat_prompt}, empty scene, no products, no items, no clothing, no garments, only background setting, studio backdrop, seamless paper, wooden or marble surface, soft studio lighting, depth, photorealistic, no people"
 
 
 def composite_product_on_image(product_rgba: Image.Image, background: Image.Image) -> Image.Image:
     bg = background.convert("RGBA").resize((768, 768), Image.Resampling.LANCZOS)
-    product = ImageOps.contain(product_rgba, (int(768 * 0.78), int(768 * 0.78)), Image.Resampling.LANCZOS)
+    # Ensure product is constrained to a reasonable size (reduce max scale to avoid covering background)
+    product = ImageOps.contain(product_rgba, (int(768 * 0.6), int(768 * 0.6)), Image.Resampling.LANCZOS)
     canvas = bg.copy()
     x = (bg.width - product.width) // 2
-    y = (bg.height - product.height) // 2
+    # Slightly lower the product so it sits naturally on a surface
+    y = int((bg.height - product.height) // 2 + bg.height * 0.08)
+
+    # Add subtle shadow beneath product for realism
+    try:
+        shadow = Image.new("RGBA", product.size, (0, 0, 0, 0))
+        alpha = product.split()[-1].convert("L")
+        shadow.paste((0, 0, 0, 220), (0, 0), alpha)
+        shadow = shadow.filter(ImageFilter.GaussianBlur(radius=12))
+        # Paste shadow slightly offset
+        canvas.paste(shadow, (x + 6, y + int(product.size[1] * 0.05)), shadow)
+    except Exception:
+        pass
+
     canvas.paste(product, (x, y), product)
     return canvas.convert("RGB")
+
+
+def keep_largest_alpha_region(img_rgba: Image.Image) -> Image.Image:
+    """Keep only the largest connected alpha region from an RGBA image.
+    This removes stray objects or multiple products present in the mask.
+    """
+    alpha = img_rgba.split()[-1].convert("L")
+    arr = np.array(alpha)
+    h, w = arr.shape
+    thresh = 10
+    visited = np.zeros((h, w), dtype=np.bool_)
+    labels = np.zeros((h, w), dtype=np.int32)
+    dirs = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    label = 0
+    largest_label = 0
+    largest_count = 0
+
+    for y in range(h):
+        for x in range(w):
+            if arr[y, x] > thresh and not visited[y, x]:
+                label += 1
+                stack = [(x, y)]
+                visited[y, x] = True
+                count = 0
+                while stack:
+                    cx, cy = stack.pop()
+                    labels[cy, cx] = label
+                    count += 1
+                    for dx, dy in dirs:
+                        nx, ny = cx + dx, cy + dy
+                        if 0 <= nx < w and 0 <= ny < h and not visited[ny, nx] and arr[ny, nx] > thresh:
+                            visited[ny, nx] = True
+                            stack.append((nx, ny))
+                if count > largest_count:
+                    largest_count = count
+                    largest_label = label
+
+    if largest_count == 0:
+        return img_rgba
+
+    mask = (labels == largest_label).astype(np.uint8) * 255
+    mask_img = Image.fromarray(mask, mode="L")
+    new = Image.new("RGBA", img_rgba.size, (0, 0, 0, 0))
+    new.paste(img_rgba, (0, 0), mask_img)
+    return new
 
 
 def generate_background(pipe, init_image: Image.Image, prompt: str, strength: float) -> Image.Image:
@@ -160,18 +220,51 @@ def process_image(req: ProcessRequest):
     t0 = time.time()
     try:
         original = download_image(req.image_url)
+        print(f"[Local AI] ✓ Tải ảnh: {original.size}")
+        
+        # Step 1: Tách nền sản phẩm
         product_rgba = remove_background(original)
+        print(f"[Local AI] ✓ Tách nền sản phẩm: {product_rgba.size}")
+        # Keep only the largest object in case multiple products were detected
+        product_rgba = keep_largest_alpha_region(product_rgba)
+        print(f"[Local AI] ✓ Giữ vật thể lớn nhất: {product_rgba.size}")
+        
+        # Step 2: Build prompt BACKGROUND ONLY - không có bất kỳ mention sản phẩm nào
         prompt = build_prompt(req)
+        
         pipe = get_sd_pipeline()
-        background = generate_background(pipe, original, prompt, req.strength or 0.42)
+        
+        # Step 3: PHƯƠNG PHÁP MỚI - Generate PURE BACKGROUND mà không bị ảnh hưởng bởi sản phẩm
+        # Use txt2img (strength=1.0) thay vì img2img để tránh hoàn toàn artifact từ input
+        # Nó sẽ regenerate 100% từ text prompt, không reference input image
+        white_canvas = Image.new("RGB", (512, 512), color=(255, 255, 255))
+        
+        negative = "blurry, low quality, text, watermark, logo, deformed, ugly, bad anatomy, duplicate, product, items, object, clothing, shirt, polo, shoe, headphone, earphone, device, electronics, mannequin, model, person"
+        
+        with torch.inference_mode():
+            background = pipe(
+                prompt=prompt,
+                negative_prompt=negative,
+                image=white_canvas,
+                strength=1.0,
+                num_inference_steps=75,
+                guidance_scale=8.5,
+            ).images[0]
+        
+        background = background.resize((768, 768), Image.Resampling.LANCZOS)
+        print(f"[Local AI] ✓ Generate background (strength=1.0): {background.size}")
+        print(f"[Local AI] ✓ Prompt: {prompt[:80]}...")
+        
+        # Step 4: Ghép sản phẩm DEEPCOPY lên nền (sản phẩm đã bị isolate ở bước 1)
         final = composite_product_on_image(product_rgba, background)
+        print(f"[Local AI] ✓ Composite: {final.size}")
 
         buf = io.BytesIO()
         final.save(buf, format="JPEG", quality=92, optimize=True)
         b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
         elapsed = round(time.time() - t0, 1)
-        print(f"[Local AI] Xử lý xong trong {elapsed}s | {req.product_name or req.image_url[:40]}")
+        print(f"[Local AI] ✅ Xử lý xong trong {elapsed}s | {req.image_url[:40]}")
         return {
             "success": True,
             "image_base64": b64,
@@ -180,7 +273,7 @@ def process_image(req: ProcessRequest):
             "elapsed_seconds": elapsed,
         }
     except Exception as e:
-        print(f"[Local AI] Lỗi: {e}")
+        print(f"[Local AI] ❌ Lỗi: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

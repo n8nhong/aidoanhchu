@@ -158,6 +158,24 @@ export function AdminDashboard({
   const [uploadingProductId, setUploadingProductId] = useState('');
   const [uploadingProductName, setUploadingProductName] = useState('');
   
+  // Edit Product Modal States - For editing existing products in a separate modal
+  const [showEditProductModal, setShowEditProductModal] = useState(false);
+  const [editProductData, setEditProductData] = useState<Product | null>(null);
+  const [editProductTitle, setEditProductTitle] = useState('');
+  const [editProductPrice, setEditProductPrice] = useState<number>(0);
+  const [editProductOriginalPrice, setEditProductOriginalPrice] = useState<number>(0);
+  const [editProductImage, setEditProductImage] = useState('');
+  const [editProductCategoryId, setEditProductCategoryId] = useState('');
+  const [editProductPlatform, setEditProductPlatform] = useState<'shopee' | 'tiktok' | 'lazada'>('shopee');
+  const [editProductAffiliateLink, setEditProductAffiliateLink] = useState('');
+  const [editProductDescription, setEditProductDescription] = useState('');
+  const [editProductVideoUrl, setEditProductVideoUrl] = useState('');
+  const [editProductPostDate, setEditProductPostDate] = useState('');
+  const [editProductIsSuggested, setEditProductIsSuggested] = useState(false);
+  const [editProductIsDirectProduct, setEditProductIsDirectProduct] = useState(false);
+  const [editProductAttachedOnlineProductId, setEditProductAttachedOnlineProductId] = useState('');
+  const [editProductError, setEditProductError] = useState('');
+  
   // Database Supabase States
   const [dbSupabaseUrl, setDbSupabaseUrl] = useState(() => localStorage.getItem('supabase_url') || '');
   const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('supabase_key') || '');
@@ -297,6 +315,86 @@ export function AdminDashboard({
     } catch (e) {
       console.error(e);
     }
+  };
+
+  // Open modal for editing a specific product
+  const openEditProductModal = (product: Product) => {
+    setEditProductData(product);
+    setEditProductTitle(product.title);
+    setEditProductPrice(product.price);
+    setEditProductOriginalPrice(product.originalPrice);
+    setEditProductImage(product.image);
+    setEditProductCategoryId(product.categoryId);
+    setEditProductPlatform(product.platform);
+    setEditProductAffiliateLink(product.affiliateLink);
+    setEditProductDescription(product.description || '');
+    setEditProductVideoUrl(product.videoUrl || '');
+    setEditProductPostDate(product.postDate || '');
+    setEditProductIsSuggested(product.isSuggested || false);
+    setEditProductIsDirectProduct(product.isDirectProduct || false);
+    setEditProductAttachedOnlineProductId(product.attachedOnlineProductId || '');
+    setEditProductError('');
+    setShowEditProductModal(true);
+  };
+
+  // Save changes and update product
+  const handleSaveEditProduct = () => {
+    if (!editProductData) return;
+    
+    setEditProductError('');
+
+    // Validate input
+    if (!editProductTitle.trim()) {
+      setEditProductError('Vui lòng nhập tên sản phẩm!');
+      return;
+    }
+
+    if (!editProductAffiliateLink.trim()) {
+      setEditProductError('Vui lòng nhập đường dẫn liên kết!');
+      return;
+    }
+
+    if (editProductPrice <= 0) {
+      setEditProductError('Giá phải lớn hơn 0!');
+      return;
+    }
+
+    // Calculate discount
+    const calculatedDiscount = editProductOriginalPrice > editProductPrice
+      ? Math.round(((editProductOriginalPrice - editProductPrice) / editProductOriginalPrice) * 100)
+      : 0;
+
+    // Update product
+    const updatedProduct: Product = {
+      ...editProductData,
+      title: editProductTitle,
+      price: editProductPrice,
+      originalPrice: editProductOriginalPrice,
+      discountPercent: calculatedDiscount,
+      image: editProductImage,
+      categoryId: editProductCategoryId,
+      platform: editProductPlatform,
+      affiliateLink: editProductAffiliateLink,
+      description: editProductDescription,
+      videoUrl: editProductVideoUrl,
+      postDate: editProductPostDate || '27/05/2026',
+      isSuggested: editProductIsSuggested,
+      isDirectProduct: editProductIsDirectProduct,
+      attachedOnlineProductId: editProductAttachedOnlineProductId || undefined
+    };
+
+    onUpdateProduct(updatedProduct);
+    setShowEditProductModal(false);
+    setEditProductData(null);
+    setSuccessMsg('✅ Đã cập nhật sản phẩm thành công!');
+    setTimeout(() => setSuccessMsg(''), 3000);
+  };
+
+  // Cancel editing
+  const handleCancelEditProduct = () => {
+    setShowEditProductModal(false);
+    setEditProductData(null);
+    setEditProductError('');
   };
 
   // Multi-key form variables
@@ -3553,7 +3651,7 @@ export function AdminDashboard({
 
                         {/* Edit Button */}
                         <button 
-                          onClick={() => startEditProduct(item)}
+                          onClick={() => openEditProductModal(item)}
                           type="button"
                           className="p-1.5 border border-amber-300 text-amber-600 hover:text-amber-800 bg-amber-50 rounded hover:bg-amber-100 transition-colors cursor-pointer"
                           title="Sửa bài viết / Đổi link"
@@ -6654,6 +6752,267 @@ CREATE POLICY "Allow ALL" ON public.affiliate_products FOR ALL USING (true) WITH
           }}
           supabase={supabase}
         />
+      )}
+
+      {/* Edit Product Modal */}
+      {showEditProductModal && editProductData && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={handleCancelEditProduct}
+        >
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.95, opacity: 0, y: 20 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            className="bg-white rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-gradient-to-r from-amber-500 to-amber-600 p-6 text-white flex items-center justify-between border-b border-amber-700">
+              <div className="flex items-center gap-3">
+                <Edit3 className="w-6 h-6" />
+                <h2 className="text-xl font-bold">Chỉnh Sửa Sản Phẩm</h2>
+              </div>
+              <button 
+                onClick={handleCancelEditProduct}
+                className="text-white hover:bg-white/20 p-2 rounded transition-colors"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-5">
+              {/* Error Message */}
+              {editProductError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm font-semibold flex items-start gap-2">
+                  <span className="text-lg">⚠️</span>
+                  <span>{editProductError}</span>
+                </div>
+              )}
+
+              {/* Row 1: Title */}
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">
+                  📝 Tên Sản Phẩm <span className="text-red-500">*</span>
+                </label>
+                <input 
+                  type="text"
+                  value={editProductTitle}
+                  onChange={(e) => setEditProductTitle(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                  placeholder="Nhập tên sản phẩm..."
+                />
+              </div>
+
+              {/* Row 2: Platform & Category */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    🏪 Nền Tảng <span className="text-red-500">*</span>
+                  </label>
+                  <select 
+                    value={editProductPlatform}
+                    onChange={(e) => setEditProductPlatform(e.target.value as any)}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  >
+                    <option value="shopee">Shopee</option>
+                    <option value="tiktok">TikTok</option>
+                    <option value="lazada">Lazada</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    🏷️ Danh Mục
+                  </label>
+                  <select 
+                    value={editProductCategoryId}
+                    onChange={(e) => setEditProductCategoryId(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  >
+                    {categories.map(cat => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Row 3: Prices */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    💵 Giá Bán <span className="text-red-500">*</span>
+                  </label>
+                  <input 
+                    type="number"
+                    value={editProductPrice}
+                    onChange={(e) => setEditProductPrice(Number(e.target.value))}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    💰 Giá Gốc (Tính % Giảm)
+                  </label>
+                  <input 
+                    type="number"
+                    value={editProductOriginalPrice}
+                    onChange={(e) => setEditProductOriginalPrice(Number(e.target.value))}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+
+              {/* Row 4: Affiliate Link */}
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">
+                  🔗 Đường Dẫn Liên Kết <span className="text-red-500">*</span>
+                </label>
+                <input 
+                  type="text"
+                  value={editProductAffiliateLink}
+                  onChange={(e) => setEditProductAffiliateLink(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono text-xs"
+                  placeholder="https://..."
+                />
+                <p className="text-xs text-gray-500 mt-1">Sử dụng link Shopee/TikTok/Lazada (sẽ được chuyển thành link tiếp thị)</p>
+              </div>
+
+              {/* Row 5: Image URL */}
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">
+                  🖼️ URL Hình Ảnh
+                </label>
+                <input 
+                  type="text"
+                  value={editProductImage}
+                  onChange={(e) => setEditProductImage(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="https://..."
+                />
+                {editProductImage && (
+                  <div className="mt-3 flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <img 
+                      src={editProductImage} 
+                      alt="Preview" 
+                      className="w-16 h-16 object-cover rounded border border-gray-200"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                    <div className="flex-1 text-xs text-gray-600">
+                      <p className="font-semibold">Xem trước hình ảnh</p>
+                      <p className="text-gray-500 truncate">{editProductImage}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Row 6: Description */}
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">
+                  📄 Mô Tả Sản Phẩm
+                </label>
+                <textarea 
+                  value={editProductDescription}
+                  onChange={(e) => setEditProductDescription(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none"
+                  rows={4}
+                  placeholder="Nhập mô tả sản phẩm..."
+                />
+              </div>
+
+              {/* Row 7: Video & Post Date */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    🎥 Link Video (Tuỳ Chọn)
+                  </label>
+                  <input 
+                    type="text"
+                    value={editProductVideoUrl}
+                    onChange={(e) => setEditProductVideoUrl(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="https://..."
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    📅 Ngày Đăng
+                  </label>
+                  <input 
+                    type="text"
+                    value={editProductPostDate}
+                    onChange={(e) => setEditProductPostDate(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="DD/MM/YYYY"
+                  />
+                </div>
+              </div>
+
+              {/* Row 8: Flags */}
+              <div className="grid grid-cols-2 gap-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox"
+                    checked={editProductIsSuggested}
+                    onChange={(e) => setEditProductIsSuggested(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300"
+                  />
+                  <span className="text-sm font-semibold text-gray-700">⭐ Gợi Ý Hôm Nay</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox"
+                    checked={editProductIsDirectProduct}
+                    onChange={(e) => setEditProductIsDirectProduct(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300"
+                  />
+                  <span className="text-sm font-semibold text-gray-700">🛍️ Sản Phẩm Trực Tiếp</span>
+                </label>
+              </div>
+
+              {/* Row 9: Online Product Association */}
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">
+                  🎁 Quà Tặng Kèm (Tuỳ Chọn)
+                </label>
+                <select 
+                  value={editProductAttachedOnlineProductId}
+                  onChange={(e) => setEditProductAttachedOnlineProductId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                >
+                  <option value="">--- Không có ---</option>
+                  {onlineProducts && onlineProducts.map((op: any) => (
+                    <option key={op.id} value={op.id}>{op.title}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="sticky bottom-0 bg-gray-50 p-6 border-t border-gray-200 flex items-center justify-end gap-3">
+              <button 
+                onClick={handleCancelEditProduct}
+                className="px-5 py-2.5 border border-gray-300 text-gray-700 font-bold rounded-lg hover:bg-gray-100 transition-colors text-sm"
+              >
+                ✕ Hủy
+              </button>
+              <button 
+                onClick={handleSaveEditProduct}
+                className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold rounded-lg hover:from-amber-600 hover:to-amber-700 transition-all text-sm shadow-md"
+              >
+                ✓ Lưu Thay Đổi
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
       )}
 
     </div>

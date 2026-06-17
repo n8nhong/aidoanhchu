@@ -7,7 +7,12 @@ dotenv.config();
 
 function loadSupabaseConfig() {
   let url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-  let key = process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+  // Uu tien key that (khong phai placeholder)
+  const candidates = [
+    process.env.SUPABASE_KEY,
+    process.env.VITE_SUPABASE_ANON_KEY,
+  ].filter(Boolean);
+  let key = candidates.find((k) => !k.includes('DIEN_') && !k.includes('paste_') && !k.includes('YOUR_')) || '';
 
   const dbPath = path.join(process.cwd(), 'db-config.json');
   if (fs.existsSync(dbPath)) {
@@ -30,10 +35,13 @@ function loadSupabaseConfig() {
 function isValidSupabaseKey(key) {
   if (!key || typeof key !== 'string') return false;
   const trimmed = key.trim();
-  if (trimmed.length < 100) return false;
+  if (trimmed.length < 20) return false;
   if (trimmed.includes('DIEN_') || trimmed.includes('paste_') || trimmed.includes('YOUR_')) return false;
-  // JWT anon key: eyJhbGci...header.payload.signature
-  return trimmed.startsWith('eyJ') && trimmed.split('.').length === 3;
+  // JWT anon key (cu): eyJhbGci...
+  if (trimmed.startsWith('eyJ') && trimmed.split('.').length === 3) return true;
+  // Publishable key (moi): sb_publishable_...
+  if (trimmed.startsWith('sb_publishable_')) return true;
+  return false;
 }
 
 async function createBucket() {

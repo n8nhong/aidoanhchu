@@ -1,39 +1,12 @@
 
-const DEFAULT_LOCAL_SD_URL = process.env.LOCAL_SD_URL || 'http://127.0.0.1:8765';
-
 /**
- * Tạo ảnh nền sản phẩm — ưu tiên GPU local, fallback Replicate nếu có token.
+ * Tạo ảnh nền sản phẩm bằng Replicate (cloud).
  */
 export async function generateBackgroundImage(promptInput: string, referenceImageUrl?: string): Promise<string> {
-  // 1) Thử máy local trước (RTX 3060)
-  if (referenceImageUrl) {
-    try {
-      const localRes = await fetch(`${DEFAULT_LOCAL_SD_URL}/process`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image_url: referenceImageUrl,
-          prompt: promptInput,
-        }),
-        signal: AbortSignal.timeout(120000),
-      });
-
-      if (localRes.ok) {
-        const data = await localRes.json();
-        if (data.image_base64) {
-          return `data:image/jpeg;base64,${data.image_base64}`;
-        }
-      }
-    } catch {
-      console.warn('[SD] Local GPU không khả dụng, thử Replicate...');
-    }
-  }
-
-  // 2) Fallback Replicate (cloud)
   const REPLICATE_TOKEN = process.env.REPLICATE_API_TOKEN;
   if (!REPLICATE_TOKEN) {
     throw new Error(
-      'Không kết nối được Local AI (chạy local-ai/start.bat). REPLICATE_API_TOKEN cũng chưa cấu hình.'
+      'REPLICATE_API_TOKEN chưa cấu hình. Vui lòng đặt token Replicate để tạo ảnh nền.'
     );
   }
 

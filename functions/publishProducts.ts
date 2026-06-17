@@ -1,6 +1,5 @@
 import { fetchShopeeProducts } from "../src/utils/shopeeScraper";
 import { generateProductContent } from "../src/utils/geminiClient";
-import { generateBackgroundImage } from "../src/utils/stableDiffusion";
 import { getSupabase } from "../src/utils/supabaseClient";
 import { inferCategory } from "../src/utils/categoryMapper";
 
@@ -15,12 +14,11 @@ export const fetchAndPublish = async (req: any, res: any) => {
     const results: any[] = [];
     for (const product of products) {
       const description = await generateProductContent(product.title, product.salesCount, product.commissionRate);
-      const generatedImage = await generateBackgroundImage(product.title, product.imageUrl);
       const category = inferCategory(product.title);
       const record = {
         title: product.title,
         description,
-        image_url: generatedImage,
+        image_url: product.imageUrl,
         price: product.price,
         original_price: Math.round(product.price * 1.2),
         commission_rate: product.commissionRate,

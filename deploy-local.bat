@@ -38,14 +38,30 @@ call npm run build
 if errorlevel 1 pause & exit /b 1
 
 echo ==== Deploy Cloud Run ====
-gcloud builds submit --tag gcr.io/hocaimienphi/aidoanhchu
+where gcloud >nul 2>&1
+if errorlevel 1 (
+  echo LOI: gcloud CLI chua duoc cai dat hoac chua duoc them vao PATH.
+  echo Vui long cai dat Google Cloud SDK va thu lai.
+  echo https://cloud.google.com/sdk/docs/install
+  pause
+  exit /b 1
+)
+
+gcloud config set project hocaimienphi --quiet
+if errorlevel 1 (
+  echo LOI: khong the thiet lap project hocaimienphi. Kiem tra quyen va dang nhap gcloud.
+  pause
+  exit /b 1
+)
+
+gcloud builds submit --tag gcr.io/hocaimienphi/aidoanhchu --project hocaimienphi
 if errorlevel 1 (
   echo LOI gcloud build. Chay: gcloud auth login
   pause
   exit /b 1
 )
 
-gcloud run deploy aidoanhchu --image gcr.io/hocaimienphi/aidoanhchu --region asia-southeast1 --platform managed --allow-unauthenticated
+gcloud run deploy aidoanhchu --image gcr.io/hocaimienphi/aidoanhchu --region asia-southeast1 --platform managed --allow-unauthenticated --project hocaimienphi
 
 echo.
 echo ==== XONG ====

@@ -8,6 +8,8 @@
  * Nếu API bị chặn → dùng danh sách sản phẩm trending mặc định.
  */
 
+import { renderPageAndExtractImage } from './puppeteerHelper';
+
 export interface ShopeeProduct {
   title: string;
   link: string;
@@ -282,6 +284,373 @@ export async function fetchShopeeProducts(): Promise<ShopeeProduct[]> {
   }
 
   return allProducts;
+}
+
+interface ShopeeProductDetail {
+  title: string;
+  price: number;
+  originalPrice: number;
+  images: string[];
+  mainImage: string;
+  description: string;
+  sales: number;
+  rating: number;
+  shop: string;
+  category: string;
+  link: string;
+}
+
+const normalizeShopeeImageUrl = (imageHash: string): string => {
+  if (!imageHash) return '';
+  return imageHash.startsWith('http')
+    ? imageHash
+    : `https://down-vn.img.susercontent.com/file/${imageHash}`;
+};
+
+/** Create a default product when API and HTML extraction fail */
+const createDefaultShopeeProduct = (finalUrl: string): ShopeeProductDetail => {
+  return {
+    title: 'Shopee Product',
+    price: 0,
+    originalPrice: 0,
+    images: ['https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=400'],
+    mainImage: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=400',
+    description: 'Product from Shopee (image will be regenerated with AI)',
+    sales: 0,
+    rating: 0,
+    shop: 'Shopee',
+    category: 'General',
+    link: finalUrl,
+  };
+};
+
+const resolveShopeeRedirect = async (link: string): Promise<string> => {
+  try {
+    const url = new URL(link.trim());
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === 's.shopee.vn' || hostname === 'shp.ee') {
+      const redirectRes = await fetch(link, {
+        method: 'GET',
+        redirect: 'follow',
+        signal: AbortSignal.timeout(8000),
+      });
+      return redirectRes.url || link;
+    }
+  } catch {
+    // Ignore invalid URLs
+  }
+  return link;
+};
+
+const extractShopeeIdsFromUrl = (link: string): { shopId?: string; itemId?: string } => {
+  try {
+    const url = new URL(link.trim());
+    const pathname = url.pathname;
+    const search = url.searchParams;
+
+    const affiliateMatch = pathname.match(/\/opaanlp\/(\d+)\/(\d+)/);
+    if (affiliateMatch) return { shopId: affiliateMatch[1], itemId: affiliateMatch[2] };
+
+    const directMatch = pathname.match(/-i\.(\d+)\.(\d+)/);
+    if (directMatch) return { shopId: directMatch[1], itemId: directMatch[2] };
+
+    const productPathMatch = pathname.match(/\/product\/(\d+)\/(\d+)/);
+    if (productPathMatch) return { shopId: productPathMatch[1], itemId: productPathMatch[2] };
+
+    const itemId = search.get('itemid') || search.get('item_id') || search.get('product_id');
+    const shopId = search.get('shopid') || search.get('shop_id');
+    if (itemId && shopId) return { shopId, itemId };
+
+    const normalized = link.replace(/https?:\/\//gi, '').replace(/www\./gi, '');
+    const patterns: Array<RegExp> = [
+      /-i\.(\d+)\.(\d+)/,
+      /\/product\/(\d+)\/(\d+)/,
+      /itemid=(\d+).*?shopid=(\d+)/,
+      /shopid=(\d+).*?itemid=(\d+)/
+    ];
+
+    for (const pattern of patterns) {
+      const match = normalized.match(pattern);
+      if (match) {
+        if (pattern.source.startsWith('itemid=')) return { shopId: match[2], itemId: match[1] };
+        if (pattern.source.startsWith('shopid=')) return { shopId: match[1], itemId: match[2] };
+        return { shopId: match[1], itemId: match[2] };
+      }
+    }
+  } catch {
+    // Ignore invalid URLs
+  }
+  return {};
+};
+
+/**
+ * Extract fallback data from Shopee product page HTML
+ * Used when API endpoints are blocked (403)
+ */
+async function extractShopeeDetailFromHTML(productUrl: string): Promise<ShopeeProductDetail | null> {
+  try {
+    const pageRes = await fetch(productUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Referer': 'https://shopee.vn/',
+        'Cache-Control': 'no-cache'
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!pageRes.ok) {
+      console.warn('⚠️ HTML fetch failed, status:', pageRes.status);
+      return null;
+    }
+    const html = await pageRes.text();
+
+    // Extract OpenGraph image
+    const ogImageMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
+    const ogImage = ogImageMatch ? ogImageMatch[1] : '';
+    console.log('  🔍 OG image:', ogImage || 'NOT FOUND');
+
+    // Extract OpenGraph title
+    const ogTitleMatch = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i);
+    const ogTitle = ogTitleMatch ? ogTitleMatch[1] : '';
+    console.log('  🔍 OG title:', ogTitle || 'NOT FOUND');
+
+    // Extract OpenGraph description
+    const ogDescMatch = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i);
+    const ogDesc = ogDescMatch ? ogDescMatch[1] : '';
+    console.log('  🔍 OG desc:', ogDesc ? ogDesc.slice(0, 50) : 'NOT FOUND');
+
+    // Try to extract from JSON-LD structured data
+    const jsonldMatch = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i);
+    let jsonldImage = '';
+    let jsonldPrice = 0;
+    if (jsonldMatch) {
+      try {
+        const jsonldData = JSON.parse(jsonldMatch[1]);
+        jsonldImage = jsonldData.image ? (Array.isArray(jsonldData.image) ? jsonldData.image[0] : jsonldData.image) : '';
+        jsonldPrice = jsonldData.offers?.price ? parseFloat(jsonldData.offers.price) : 0;
+        console.log('  🔍 JSON-LD image:', jsonldImage || 'EMPTY', 'price:', jsonldPrice);
+      } catch (e) {
+        console.warn('  🔍 JSON-LD parse failed');
+      }
+    } else {
+      console.log('  🔍 JSON-LD not found');
+    }
+
+    // Try to extract from inline PRELOADED_STATE (React state dump)
+    let stateImage = '';
+    let stateTitle = '';
+    let statePrice = 0;
+    const preloadedMatch = html.match(/window\.__PRELOADED_STATE__=\{([\s\S]*?)\};/i);
+    if (preloadedMatch) {
+      try {
+        // Just look for common image patterns within the state
+        const stateSnippet = preloadedMatch[0].slice(0, 50000); // First 50KB of state
+        const imageInState = stateSnippet.match(/["']image["']:\s*["']([^"']+\.(?:jpg|png|jpeg|webp))["']/i);
+        if (imageInState) {
+          stateImage = imageInState[1].startsWith('http') ? imageInState[1] : `https://down-vn.img.susercontent.com/file/${imageInState[1]}`;
+          console.log('  🔍 PRELOADED STATE image found:', stateImage.slice(0, 80));
+        } else {
+          console.log('  🔍 No image in PRELOADED_STATE');
+        }
+      } catch (e) {
+        console.warn('  🔍 PRELOADED_STATE parse failed');
+      }
+    } else {
+      console.log('  🔍 PRELOADED_STATE not found');
+    }
+
+    // Additional fallback: look for common image hosting patterns and any absolute image URLs
+    let fallbackImage = '';
+    const senticationImagePatterns = [
+      /["']?image["']?:\s*["']([^"']*\.(?:jpg|png|jpeg|webp)[^"']*)/gi,
+      /src=["']([^"']*down-vn\.img\.susercontent\.com[^"']*)/gi,
+      /https:\/\/down-vn\.img\.susercontent.com\/file\/[a-zA-Z0-9_\-]+/gi,
+    ];
+
+    for (const pattern of senticationImagePatterns) {
+      const m = pattern.exec(html);
+      if (m && m[1]) {
+        fallbackImage = m[1];
+        if (fallbackImage.startsWith('http')) {
+          console.log('  🔍 Fallback image found via pattern:', fallbackImage.slice(0, 200));
+          break;
+        }
+      }
+    }
+
+    // Generic last-resort: scan for any absolute image URL in the HTML and pick the largest-looking one
+    if (!fallbackImage) {
+      const urlMatches = Array.from(html.matchAll(/https?:\/\/[^\"'\s<>]+\.(?:jpg|jpeg|png|webp)(?:\?[^\"'\s<>]*)?/gi)).map(m => m[0]);
+      if (urlMatches.length) {
+        // Prefer shopee/cf or susercontent hosts
+        const prefer = urlMatches.find(u => /susercontent|cf\.shopee|down-vn|cf\.s?hopee|\/file\//i.test(u));
+        if (prefer) {
+          fallbackImage = prefer;
+        } else {
+          // As a better heuristic, HEAD each candidate (with short timeout) and pick the one with largest Content-Length
+          let best = '';
+          let bestSize = 0;
+          const candidates = urlMatches.slice(0, 8); // limit to first 8
+          for (const u of candidates) {
+            try {
+              const res = await fetch(u, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(4000) });
+              if (res && res.ok) {
+                const len = parseInt(res.headers.get('content-length') || '0');
+                if (len > bestSize) {
+                  bestSize = len;
+                  best = u;
+                }
+              }
+            } catch (e) {
+              // ignore individual HEAD failures
+            }
+          }
+          fallbackImage = best || urlMatches[0];
+        }
+        console.log('  🔍 Generic image scan found:', (fallbackImage || '').slice(0, 200));
+      }
+    }
+
+    // Prioritize image sources
+    const finalImage = ogImage || stateImage || jsonldImage || fallbackImage;
+    const finalTitle = stateTitle || ogTitle || 'Shopee Product';
+    const finalPrice = statePrice || jsonldPrice || 0;
+
+    if (!finalImage) {
+      console.warn('  ❌ No image found in any fallback source — trying Puppeteer render...');
+      try {
+        const puppImg = await renderPageAndExtractImage(productUrl);
+        if (puppImg) {
+          console.log('  ✅ Puppeteer extracted image:', puppImg.slice(0, 200));
+          return {
+            title: finalTitle,
+            price: finalPrice,
+            originalPrice: finalPrice || 150000,
+            images: puppImg ? [puppImg] : [],
+            mainImage: puppImg || '',
+            description: ogDesc || 'Product from Shopee',
+            sales: 0,
+            rating: 0,
+            shop: 'Shopee Store',
+            category: 'General',
+            link: productUrl,
+          };
+        }
+      } catch (e) {
+        console.warn('  ❌ Puppeteer extraction failed', e);
+      }
+      console.warn('  ❌ No image found in any fallback source');
+      return null;
+    }
+
+    console.log('  ✅ HTML fallback SUCCESS: image found');
+    return {
+      title: finalTitle,
+      price: finalPrice,
+      originalPrice: finalPrice || 150000,
+      images: finalImage ? [finalImage] : [],
+      mainImage: finalImage,
+      description: ogDesc || 'Product from Shopee',
+      sales: 0,
+      rating: 0,
+      shop: 'Shopee Store',
+      category: 'General',
+      link: productUrl,
+    };
+  } catch (error) {
+    console.warn('❌ HTML fallback extraction exception:', error);
+    return null;
+  }
+}
+
+export async function fetchShopeeProductDetailsFromUrl(inputUrl: string): Promise<ShopeeProductDetail | null> {
+  try {
+    const finalUrl = await resolveShopeeRedirect(inputUrl);
+    const ids = extractShopeeIdsFromUrl(finalUrl);
+    if (!ids.shopId || !ids.itemId) {
+      return null;
+    }
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      Accept: 'application/json, text/plain, */*',
+      Referer: finalUrl,
+      'X-Shopee-Language': 'vi',
+      'x-requested-with': 'XMLHttpRequest',
+    };
+
+    const apiUrls = [
+      `https://shopee.vn/api/v4/item/get?itemid=${ids.itemId}&shopid=${ids.shopId}`,
+      `https://shopee.vn/api/v2/product/get_product_detail?product_id=${ids.itemId}&shop_id=${ids.shopId}`
+    ];
+
+    let item: any = null;
+    for (const apiUrl of apiUrls) {
+      try {
+        const res = await fetch(apiUrl, { headers, signal: AbortSignal.timeout(10000) });
+        if (!res.ok) continue;
+        const json = await res.json();
+        if (json?.data?.product) {
+          item = json.data.product;
+        } else if (json?.data) {
+          item = json.data;
+        }
+        if (item) break;
+      } catch {
+        continue;
+      }
+    }
+
+    if (item) {
+      // API succeeded, return data from API
+      const images: string[] = [];
+      if (item.image) images.push(normalizeShopeeImageUrl(item.image));
+      if (Array.isArray(item.images)) {
+        item.images.forEach((hash: string) => {
+          if (hash) images.push(normalizeShopeeImageUrl(hash));
+        });
+      }
+      if (!images.length && item.image_url) images.push(normalizeShopeeImageUrl(item.image_url));
+      if (!images.length && Array.isArray(item.image_urls)) {
+        item.image_urls.forEach((hash: string) => {
+          if (hash) images.push(normalizeShopeeImageUrl(hash));
+        });
+      }
+
+      const uniqueImages = Array.from(new Set(images.filter(Boolean)));
+
+      return {
+        title: item.name || item.title || '',
+        price: Math.round((item.price || item.price_before_discount || 0) / 100000),
+        originalPrice: Math.round((item.price_before_discount || item.price || 0) / 100000),
+        images: uniqueImages,
+        mainImage: uniqueImages[0] || '',
+        description: item.description || item.cate_and_attr || '',
+        sales: item.historical_sold || item.sold || 0,
+        rating: parseFloat(item.item_rating?.rating_star || '0') || 0,
+        shop: item.shop?.name || item.shop_location || '',
+        category: String(item.catid || item.category || 'General'),
+        link: finalUrl,
+      };
+    }
+
+    // API failed (likely 403), try HTML fallback
+    console.warn('⚠️ Shopee API failed, trying HTML fallback for:', finalUrl);
+    const htmlFallback = await extractShopeeDetailFromHTML(finalUrl);
+    if (htmlFallback) {
+      return htmlFallback;
+    }
+
+    // Both API and HTML extraction failed, return a default product
+    // so user can regenerate image with AI
+    console.warn('⚠️ Both API and HTML extraction failed, returning default product with placeholder');
+    return createDefaultShopeeProduct(finalUrl);
+  } catch (error) {
+    console.error('❌ fetchShopeeProductDetailsFromUrl exception:', (error as Error).message);
+    return null;
+  }
 }
 
 /**

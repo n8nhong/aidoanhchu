@@ -36,6 +36,15 @@ export interface ProcessLocalImageParams {
 
 /** Kiểm tra máy tạo ảnh local có đang chạy không */
 export async function checkLocalImageService(baseUrl?: string): Promise<LocalImageHealth | null> {
+  // Disable local GPU checks when running in deployed Cloud Run / production environments
+  try {
+    if (typeof window !== 'undefined' && /run\.app$/.test(window.location.hostname)) {
+      return null;
+    }
+  } catch {
+    // fallthrough
+  }
+
   const url = (baseUrl || getLocalSdUrl()).replace(/\/$/, '');
   try {
     const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(4000) });
@@ -47,6 +56,13 @@ export async function checkLocalImageService(baseUrl?: string): Promise<LocalIma
 }
 
 export async function isLocalImageServiceAvailable(baseUrl?: string): Promise<boolean> {
+  try {
+    if (typeof window !== 'undefined' && /run\.app$/.test(window.location.hostname)) {
+      return false;
+    }
+  } catch {
+    // ignore
+  }
   const health = await checkLocalImageService(baseUrl);
   return health?.status === 'ok';
 }
@@ -56,6 +72,18 @@ export async function isLocalImageServiceAvailable(baseUrl?: string): Promise<bo
  * Trả về data URL (data:image/jpeg;base64,...).
  */
 export async function processProductImageLocal(params: ProcessLocalImageParams): Promise<string> {
+  // Prevent calling local GPU service in deployed environments
+  try {
+    if (typeof window !== 'undefined' && /run\.app$/.test(window.location.hostname)) {
+      throw new Error('Local image generation disabled in deployed app');
+    }
+  } catch (e) {
+    // If window is undefined (SSR) or regex throws, continue to attempt local call
+    if (typeof window !== 'undefined' && /run\.app$/.test(window.location.hostname)) {
+      throw new Error('Local image generation disabled in deployed app');
+    }
+  }
+
   const base = (params.baseUrl || getLocalSdUrl()).replace(/\/$/, '');
 
   const res = await fetch(`${base}/process`, {

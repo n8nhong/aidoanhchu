@@ -8,7 +8,7 @@ if not exist "install.bat" (
   echo.
   echo [LOI] Khong tim thay thu muc may-tao-anh-ai!
   echo Hay mo: Desktop\shopee\cua-hang-afili\may-tao-anh-ai\
-  pause
+if not defined NO_PAUSE pause
   exit /b 1
 )
 call install.bat
