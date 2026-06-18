@@ -1020,7 +1020,7 @@ export function AdminDashboard({
     try {
       setErrorMsg('');
       const supabase = (await import('@supabase/supabase-js')).createClient(url, key);
-      const { error } = await supabase.from('affiliate_products').delete().neq('id', '');
+      const { error } = await supabase.from('affiliate_products').delete().gt('id', '');
       
       if (error) {
         setErrorMsg(`❌ Lỗi xóa: ${error.message}`);

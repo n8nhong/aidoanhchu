@@ -1291,8 +1291,8 @@ Bạn muốn tìm hiểu thêm về khía cạnh nào? Hãy gõ câu hỏi hoặ
     }
   };
 
-  // Filter suggested products specifically for "Gợi Ý Hôm Nay"
-  const suggestedProducts = filteredProducts.filter(p => p.isSuggested);
+  // Filter suggested products specifically for "Gợi Ý Hôm Nay" - include both local and affiliate products
+  const suggestedProducts = [...filteredProducts.filter(p => p.isSuggested), ...(onlineProducts || [])].slice(0, 20);
 
   return (
     <div className="min-h-screen flex flex-col font-sans bg-shopee-bg">
