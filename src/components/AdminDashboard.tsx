@@ -59,6 +59,9 @@ import { generateProductContent } from '../utils/geminiClient';
 import { autoCategorize, isIndustryCategoryId, normalizeCategoryId, INDUSTRY_CATEGORY_NAMES } from '../utils/autoCategorize';
 import { getSceneBackgroundForCategory } from '../utils/categoryScenes';
 import { ImageUploadModal } from './ImageUploadModal';
+import { PublishedProductsTracker } from './PublishedProductsTracker';
+import { getTrackerInstance } from '../utils/publishedProductsTracker';
+import { verifyProductInfo } from '../utils/productVerification';
 
 // compressImage is now imported from ../utils
 
@@ -128,7 +131,7 @@ export function AdminDashboard({
   const stats = MOCK_STATS;
 
   // Active sub-tab in admin panel
-  const [adminTab, setAdminTab] = useState<'listings' | 'analytics' | 'social' | 'online_campaigns' | 'gemini_keys' | 'licenses' | 'database' | 'auto_publish'>('listings');
+  const [adminTab, setAdminTab] = useState<'listings' | 'analytics' | 'social' | 'online_campaigns' | 'gemini_keys' | 'licenses' | 'database' | 'auto_publish' | 'published'>('listings');
 
   const [licenses, setLicenses] = useState<any[]>([]);
   const [newLicenseName, setNewLicenseName] = useState('');
@@ -804,6 +807,29 @@ export function AdminDashboard({
 
         onAddProduct(newProduct);
         successCount++;
+
+        // 📋 Lưu vào Published Products Tracker
+        try {
+          const tracker = getTrackerInstance();
+          const csvFileName = 'CSV Auto Publish';
+          tracker.addPublishedProduct({
+            id: newProduct.id,
+            csvSource: csvFileName,
+            productName: product.itemName,
+            shopeeLink: product.offerLink || product.productLink,
+            affiliateLink: newProduct.affiliateLink,
+            imageUrl: newProduct.image,
+            description: newProduct.description,
+            price: newProduct.price,
+            originalPrice: newProduct.originalPrice,
+            categoryId: newProduct.categoryId,
+            publishedAt: new Date().toISOString(),
+            status: 'success',
+            verificationStatus: 'not_checked'
+          });
+        } catch (trackErr) {
+          console.warn('Lỗi lưu tracker:', trackErr);
+        }
 
         setCsvProcessing({
           isProcessing: true,
@@ -2500,6 +2526,12 @@ export function AdminDashboard({
           className={`pb-3 px-4 font-bold uppercase tracking-wider transition-all border-b-2 cursor-pointer relative ${adminTab === 'auto_publish' ? 'border-shopee-orange text-shopee-orange' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
         >
           ⚡ Auto Publish (Tự Động)
+        </button>
+        <button 
+          onClick={() => setAdminTab('published')}
+          className={`pb-3 px-4 font-bold uppercase tracking-wider transition-all border-b-2 cursor-pointer relative ${adminTab === 'published' ? 'border-shopee-orange text-shopee-orange' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+        >
+          📋 Lịch Sử Đã Đăng
         </button>
         {adminRole === 'super' && (
           <button 
@@ -5833,6 +5865,12 @@ export function AdminDashboard({
               </p>
             </div>
           </div>
+        </div>
+      )}
+
+      {adminTab === 'published' && (
+        <div className="bg-white rounded-md shadow-sm border border-gray-200 p-6 animate-fadeIn font-sans">
+          <PublishedProductsTracker />
         </div>
       )}
 
