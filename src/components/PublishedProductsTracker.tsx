@@ -6,11 +6,15 @@
 import React, { useState, useEffect } from 'react';
 import { PublishedProduct, getTrackerInstance } from '../utils/publishedProductsTracker';
 import { verifyProductInfo, generateVerificationSummary } from '../utils/productVerification';
-import { Trash2, RefreshCw, CheckCircle, AlertCircle, Clock, Eye, Copy, ExternalLink } from 'lucide-react';
+import { Trash2, RefreshCw, CheckCircle, AlertCircle, Clock, Eye, Copy, ExternalLink, Edit2, X, Save } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface PublishedProductsTrackerProps {
   onRefresh?: () => void;
+}
+
+interface EditingProduct extends Partial<PublishedProduct> {
+  id: string;
 }
 
 export function PublishedProductsTracker({ onRefresh }: PublishedProductsTrackerProps) {
@@ -18,6 +22,8 @@ export function PublishedProductsTracker({ onRefresh }: PublishedProductsTracker
   const [selectedSource, setSelectedSource] = useState<string>('all');
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingProduct, setEditingProduct] = useState<EditingProduct | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const tracker = getTrackerInstance();
 
@@ -68,6 +74,35 @@ export function PublishedProductsTracker({ onRefresh }: PublishedProductsTracker
     if (window.confirm('Bạn có chắc chắn muốn xóa sản phẩm này khỏi lịch sử?')) {
       tracker.deleteProduct(productId);
       loadProducts();
+    }
+  };
+
+  const handleEditOpen = (product: PublishedProduct) => {
+    setEditingProduct({
+      id: product.id,
+      description: product.description,
+      imageUrl: product.imageUrl,
+    });
+  };
+
+  const handleEditSave = async () => {
+    if (!editingProduct || !editingProduct.id) return;
+    
+    setIsSaving(true);
+    try {
+      tracker.updatePublishedProduct(editingProduct.id, {
+        description: editingProduct.description || undefined,
+        imageUrl: editingProduct.imageUrl || undefined,
+      });
+      
+      loadProducts();
+      setEditingProduct(null);
+      alert('✅ Cập nhật sản phẩm thành công!');
+    } catch (error) {
+      console.error('Error updating product:', error);
+      alert('❌ Lỗi khi cập nhật sản phẩm');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -301,7 +336,7 @@ export function PublishedProductsTracker({ onRefresh }: PublishedProductsTracker
                         )}
 
                         {/* Actions */}
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 flex-wrap">
                           <button
                             onClick={() => handleVerify(product)}
                             disabled={verifyingId === product.id}
@@ -320,6 +355,13 @@ export function PublishedProductsTracker({ onRefresh }: PublishedProductsTracker
                             )}
                           </button>
                           <button
+                            onClick={() => handleEditOpen(product)}
+                            className="px-3 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-bold flex items-center gap-1"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                            Chỉnh sửa
+                          </button>
+                          <button
                             onClick={() => handleDelete(product.id)}
                             className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-xs font-bold flex items-center gap-1"
                           >
@@ -336,6 +378,120 @@ export function PublishedProductsTracker({ onRefresh }: PublishedProductsTracker
           </div>
         </>
       )}
+
+      {/* Edit Modal */}
+      <AnimatePresence>
+        {editingProduct && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+            onClick={() => setEditingProduct(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 overflow-hidden"
+            >
+              {/* Header */}
+              <div className="bg-gradient-to-r from-green-500 to-green-600 px-6 py-4 flex items-center justify-between">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Edit2 className="w-5 h-5" />
+                  Chỉnh sửa sản phẩm
+                </h3>
+                <button
+                  onClick={() => setEditingProduct(null)}
+                  className="text-white hover:bg-white/20 rounded-full p-1 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="px-6 py-4 space-y-4 max-h-96 overflow-y-auto">
+                {/* Mô tả */}
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    📝 Mô tả sản phẩm
+                  </label>
+                  <textarea
+                    value={editingProduct.description || ''}
+                    onChange={(e) => setEditingProduct({
+                      ...editingProduct,
+                      description: e.target.value
+                    })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-green-500"
+                    rows={5}
+                    placeholder="Nhập mô tả sản phẩm..."
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Ký tự: {(editingProduct.description || '').length}
+                  </p>
+                </div>
+
+                {/* Ảnh sản phẩm */}
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    🖼️ URL ảnh sản phẩm
+                  </label>
+                  <input
+                    type="text"
+                    value={editingProduct.imageUrl || ''}
+                    onChange={(e) => setEditingProduct({
+                      ...editingProduct,
+                      imageUrl: e.target.value
+                    })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="https://example.com/image.jpg"
+                  />
+                  {editingProduct.imageUrl && (
+                    <div className="mt-2">
+                      <img
+                        src={editingProduct.imageUrl}
+                        alt="Preview"
+                        className="w-24 h-24 rounded object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = 'https://via.placeholder.com/100?text=Invalid';
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="bg-gray-50 px-6 py-4 flex gap-2 justify-end border-t border-gray-200">
+                <button
+                  onClick={() => setEditingProduct(null)}
+                  className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-800 rounded-lg font-bold text-sm transition"
+                >
+                  Hủy
+                </button>
+                <button
+                  onClick={handleEditSave}
+                  disabled={isSaving}
+                  className="px-4 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white rounded-lg font-bold text-sm flex items-center gap-2 transition"
+                >
+                  {isSaving ? (
+                    <>
+                      <span className="animate-spin">⏳</span>
+                      Đang lưu...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      Lưu thay đổi
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

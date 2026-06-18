@@ -157,6 +157,20 @@ export class PublishedProductsTracker {
   }
 
   /**
+   * Update product fields (incremental - chỉ update những field được thay đổi)
+   */
+  updatePublishedProduct(productId: string, updates: Partial<PublishedProduct>) {
+    const product = this.products.find(p => p.id === productId);
+    if (product) {
+      // Chỉ update những field được truyền vào
+      Object.assign(product, updates);
+      this.saveToStorage();
+      return product;
+    }
+    return null;
+  }
+
+  /**
    * Clear all
    */
   clear() {
