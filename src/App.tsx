@@ -142,6 +142,25 @@ export default function App() {
     return () => window.removeEventListener('storage', syncState);
   }, []);
 
+  // Fetch affiliate products from API on mount
+  useEffect(() => {
+    const fetchAffiliateProducts = async () => {
+      try {
+        const response = await fetch('/api/affiliate-products');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.products && data.products.length > 0) {
+            setOnlineProducts(data.products);
+            localStorage.setItem('affili_online_products', JSON.stringify(data.products));
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching affiliate products:', error);
+      }
+    };
+    fetchAffiliateProducts();
+  }, []);
+
   // Lucky wheel spin states for guest lead conversion
   const [spinLoading, setSpinLoading] = useState(false);
   const [spinResult, setSpinResult] = useState<any>(null);
