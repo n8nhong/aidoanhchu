@@ -2,6 +2,10 @@ import puppeteer from 'puppeteer';
 import fs from 'fs';
 import os from 'os';
 
+if (typeof window !== 'undefined') {
+  throw new Error('puppeteerHelper should not be imported in browser context');
+}
+
 function findChromeExecutable(): string | null {
   const platform = os.platform();
   const candidates: string[] = [];
