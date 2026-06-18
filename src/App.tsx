@@ -251,7 +251,8 @@ export default function App() {
       }
 
       // 2. Fetch from Supabase if configured
-      let url = localStorage.getItem('supabase_url') || 'https://encpsaatojnxgyjjcvnx.supabase.co';
+      let projectId = localStorage.getItem('supabase_url') || 'wgtchjeondykhwljmneg';
+      let url = projectId.startsWith('http') ? projectId : `https://${projectId}.supabase.co`;
       let key = localStorage.getItem('supabase_key');
       
       // If we don't have the key in local storage, ask the server for the global config
@@ -325,8 +326,19 @@ export default function App() {
                  }));
                  console.log('✅ Affiliate Products Loaded:', normalizedAff.length, 'items');
                  if (!expressDbData.affili_products || normalizedAff.length >= expressDbData.affili_products.length) {
-                    setProducts(normalizedAff);
-                    localStorage.setItem('affili_products', JSON.stringify(normalizedAff));
+                    const localProductsRaw = localStorage.getItem('affili_products');
+                    let localProducts: any[] = [];
+                    try {
+                      localProducts = localProductsRaw ? JSON.parse(localProductsRaw) : [];
+                    } catch (e) {
+                      localProducts = [];
+                    }
+                    const mergedAff = normalizedAff.map((cloudProduct: any) => {
+                      const localProduct = localProducts.find((p: any) => p.id === cloudProduct.id);
+                      return localProduct ? { ...cloudProduct, ...localProduct } : cloudProduct;
+                    });
+                    setProducts(mergedAff);
+                    localStorage.setItem('affili_products', JSON.stringify(mergedAff));
                  }
              } else {
                console.log('⚠️ Affiliate products is empty or not an array');
@@ -587,7 +599,8 @@ export default function App() {
     setItemResilient('affili_buyers', JSON.stringify(buyers));
     // Push to Supabase if configured
     const pushCloud = async () => {
-      let url = localStorage.getItem('supabase_url') || 'https://encpsaatojnxgyjjcvnx.supabase.co';
+      let projectId = localStorage.getItem('supabase_url') || 'wgtchjeondykhwljmneg';
+      let url = projectId.startsWith('http') ? projectId : `https://${projectId}.supabase.co`;
       let key = localStorage.getItem('supabase_key');
       if (!key) {
         try {
@@ -1145,8 +1158,29 @@ Bạn muốn tìm hiểu thêm về khía cạnh nào? Hãy gõ câu hỏi hoặ
     setProducts(prevProducts => [newProduct, ...prevProducts]);
   };
 
+  const deleteProductFromSupabase = async (id: string) => {
+    try {
+      const projectId = localStorage.getItem('supabase_url') || '';
+      const url = projectId.startsWith('http') ? projectId : `https://${projectId}.supabase.co`;
+      const key = localStorage.getItem('supabase_key');
+      if (!url || !key) return;
+      
+      const response = await fetch(`${url}/rest/v1/affiliate_products?id=eq.${id}`, {
+        method: 'DELETE',
+        headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
+      });
+      if (!response.ok) {
+        console.warn(`Cảnh báo: Xóa từ database thất bại (${response.status}). Sản phẩm đã xóa ở local.`);
+      }
+    } catch (e) {
+      console.warn('Lỗi khi xóa từ Supabase:', e);
+    }
+  };
+
   const handleDeleteProduct = (id: string) => {
     setProducts(prevProducts => prevProducts.map(p => p.id === id ? { ...p, isDeleted: true } : p));
+    setItemResilient('affili_products', JSON.stringify(products.map(p => p.id === id ? { ...p, isDeleted: true } : p)));
+    deleteProductFromSupabase(id);
   };
 
   const handleUpdateProduct = (updatedProduct: Product) => {

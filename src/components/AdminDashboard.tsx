@@ -180,7 +180,10 @@ export function AdminDashboard({
   const [editProductError, setEditProductError] = useState('');
   
   // Database Supabase States
-  const [dbSupabaseUrl, setDbSupabaseUrl] = useState(() => localStorage.getItem('supabase_url') || '');
+  const [dbSupabaseUrl, setDbSupabaseUrl] = useState(() => {
+    const stored = localStorage.getItem('supabase_url') || '';
+    return stored.startsWith('http') ? stored.replace(/https:\/\//, '').replace(/\.supabase\.co\/$/, '').replace(/\.supabase\.co$/, '') : stored;
+  });
   const [dbSupabaseKey, setDbSupabaseKey] = useState(() => localStorage.getItem('supabase_key') || '');
   const autoPublishSourceRef = useRef<EventSource | null>(null);
 
@@ -241,17 +244,13 @@ export function AdminDashboard({
             // Nếu không có cấu hình Supabase, không thiết lập mặc định gây lỗi 400
             // Để tránh truy cập vào URL không tồn tại, chỉ thiết lập khi config cung cấp
             if (config.url) {
-              setDbSupabaseUrl(config.url);
+              const projectId = config.url.startsWith('http') ? config.url.replace(/https:\/\//, '').replace(/\.supabase\.co\/$/, '').replace(/\.supabase\.co$/, '') : config.url;
+              setDbSupabaseUrl(projectId);
+              localStorage.setItem('supabase_url', projectId);
             }
             if (config.key) {
               setDbSupabaseKey(config.key);
-            }
-            // Save to localStorage only if values exist
-            if (config.key) {
               localStorage.setItem('supabase_key', config.key);
-            }
-            if (config.url) {
-              localStorage.setItem('supabase_url', config.url);
             }
           }
         } catch(e) {}
@@ -616,7 +615,7 @@ export function AdminDashboard({
         isProcessing: true,
         currentIndex: 0,
         total: 0,
-        message: `Đang tải: ${product.itemName.substring(0, 40)}...`
+        message: `Đang tải: ${String(product.itemName || '').substring(0, 40)}...`
       });
 
       const basePrice = parsePrice(product.price);
@@ -721,7 +720,7 @@ export function AdminDashboard({
             imagePrompt = aiContent.imageKeyword;
           } catch (aiErr) {
             console.warn('Lỗi AI:', aiErr);
-            aiDescription = `${product.itemName}\n\n${product.shopName} - Sản phẩm chất lượng cao, ${product.sales} lượt bán.`;
+            aiDescription = `${product.itemName}\n\n📌 Thông tin chính:\n• Gian hàng: ${product.shopName}\n• Số lượt bán: ${product.sales}\n• Giá gốc: ${product.price}\n\n✨ Đây là sản phẩm được bán chạy trên sàn TMĐT với đánh giá tốt từ khách hàng. Sản phẩm thuộc danh mục ${INDUSTRY_CATEGORY_NAMES[industryCategoryId] || 'Thời Trang'}.\n\n💡 Lợi ích chính:\n• Chất lượng được kiểm chứng\n• Giao dịch an toàn qua sàn\n• Hỗ trợ khách hàng 24/7\n\n🎁 Hãy truy cập link bên dưới để xem chi tiết, đọc nhận xét khách hàng, và tìm hiểu thêm về sản phẩm này trước khi quyết định mua hàng.`;
           }
         }
 
@@ -731,7 +730,7 @@ export function AdminDashboard({
           isProcessing: true,
           currentIndex: i + 1,
           total: csvProducts.length,
-          message: `🎨 [${i + 1}/${csvProducts.length}] Lấy ảnh Shopee: ${product.itemName.substring(0, 30)}...`
+          message: `🎨 [${i + 1}/${csvProducts.length}] Lấy ảnh Shopee: ${String(product.itemName || '').substring(0, 30)}...`
         });
 
         try {
@@ -835,7 +834,7 @@ export function AdminDashboard({
           isProcessing: true,
           currentIndex: i + 1,
           total: csvProducts.length,
-          message: `✅ [${i + 1}/${csvProducts.length}] Đã tạo: ${product.itemName.substring(0, 30)}...`
+          message: `✅ [${i + 1}/${csvProducts.length}] Đã tạo: ${String(product.itemName || '').substring(0, 30)}...`
         });
 
         await new Promise(resolve => setTimeout(resolve, 300));
@@ -952,7 +951,8 @@ export function AdminDashboard({
   };
 
   const startAutoPublish = async () => {
-    const url = localStorage.getItem('supabase_url') || '';
+    const projectId = localStorage.getItem('supabase_url') || '';
+    const url = projectId.startsWith('http') ? projectId : `https://${projectId}.supabase.co`;
     const key = localStorage.getItem('supabase_key') || '';
     if (!url || !key) {
       alert("Vui lòng thiết lập cấu hình Supabase trong tab Quản trị trước khi chạy Auto Publish!");
@@ -1010,7 +1010,8 @@ export function AdminDashboard({
   const handleDeleteAllAffiliateProducts = async () => {
     if (!window.confirm('⚠️ Bạn chắc chắn muốn XÓA TẤT CẢ sản phẩm đã đăng từ database? Hành động này không thể hoàn tác!')) return;
     
-    const url = localStorage.getItem('supabase_url') || '';
+    const projectId = localStorage.getItem('supabase_url') || '';
+    const url = projectId.startsWith('http') ? projectId : `https://${projectId}.supabase.co`;
     const key = localStorage.getItem('supabase_key') || '';
     if (!url || !key) {
       setErrorMsg('Vui lòng cấu hình Supabase trước!');
@@ -1047,7 +1048,8 @@ export function AdminDashboard({
     
     // Push API to Supabase Cloud
     const pushCloud = async () => {
-      let url = localStorage.getItem('supabase_url') || '';
+      const projectId = localStorage.getItem('supabase_url') || '';
+      let url = projectId.startsWith('http') ? projectId : `https://${projectId}.supabase.co`;
       let key = localStorage.getItem('supabase_key');
       if (url && key) {
         try {
@@ -3832,7 +3834,8 @@ export function AdminDashboard({
                            <button
                              type="button"
                              onClick={async () => {
-                               const url = localStorage.getItem('supabase_url') || '';
+                               const projectId = localStorage.getItem('supabase_url') || '';
+                               const url = projectId.startsWith('http') ? projectId : `https://${projectId}.supabase.co`;
                                const key = localStorage.getItem('supabase_key') || '';
                                if (url && key) {
                                  try {
@@ -5721,7 +5724,7 @@ export function AdminDashboard({
                       >
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-semibold text-gray-800 truncate">
-                            {idx + 1}. {product.itemName.substring(0, 50)}
+                            {idx + 1}. {String(product.itemName || '').substring(0, 50)}
                           </p>
                           <p className="text-xs text-gray-500 mt-1">
                             {product.shopName} • {product.sales}
@@ -6055,9 +6058,9 @@ export function AdminDashboard({
                       if (bRes.ok && pRes.ok) {
                         try {
                           JSON.parse(textB); // verify it's JSON
-                          localStorage.setItem('supabase_url', cleanUrl);
+                          localStorage.setItem('supabase_url', projectId);
                           localStorage.setItem('supabase_key', key);
-                          setDbSupabaseUrl(cleanUrl);
+                          setDbSupabaseUrl(projectId);
                           await fetch('/api/db-config', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -6080,7 +6083,8 @@ export function AdminDashboard({
                 </button>
                 <button
                   onClick={async () => {
-                   let url = (dbSupabaseUrl.trim() || localStorage.getItem('supabase_url') || '') as string;
+                   let projectId = (dbSupabaseUrl.trim() || localStorage.getItem('supabase_url') || '') as string;
+                   let url = projectId.startsWith('http') ? projectId : `https://${projectId}.supabase.co`;
                    const key = (dbSupabaseKey.trim() || localStorage.getItem('supabase_key')) as string;
                    if(!url || !key) { alert("Vui lòng nhập URL và Key trước!"); return; }
                    
@@ -6124,7 +6128,8 @@ export function AdminDashboard({
                 </button>
                 <button
                   onClick={async () => {
-                    let url = (dbSupabaseUrl.trim() || localStorage.getItem('supabase_url') || '') as string;
+                    let projectId = (dbSupabaseUrl.trim() || localStorage.getItem('supabase_url') || '') as string;
+                    let url = projectId.startsWith('http') ? projectId : `https://${projectId}.supabase.co`;
                     const key = (dbSupabaseKey.trim() || localStorage.getItem('supabase_key')) as string;
                     if(!url || !key) { alert("Vui lòng nhập URL và Key trước!"); return; }
                     if (!url.startsWith('http') && !url.includes('.')) url = `https://${url}.supabase.co`;

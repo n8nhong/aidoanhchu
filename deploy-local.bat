@@ -20,7 +20,7 @@ if not errorlevel 1 (
   echo.
   echo Hay mo file .env va thay DIEN_ANON_KEY_CUA_BAN_VAO_DAY
   echo bang key anon tu Supabase:
-  echo https://supabase.com/dashboard/project/encpsaatojnxgyjjcvnx/settings/api
+  echo https://supabase.com/dashboard/project/wgtchjeondykhwljmneg/settings/api
   echo.
   pause
   exit /b 1

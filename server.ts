@@ -21,7 +21,7 @@ async function startServer() {
   const DB_FILE = path.join(process.cwd(), 'db-config.json');
   let tmpDbData: any = {};
   let globalSupabaseConfig = {
-    url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://encpsaatojnxgyjjcvnx.supabase.co',
+    url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://wgtchjeondykhwljmneg.supabase.co',
     key: process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''
   };
   try {

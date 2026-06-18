@@ -14,31 +14,63 @@ export interface ShopeeProduct {
   offerLink: string;
 }
 
+const splitCSVLine = (line: string): string[] => {
+  const values: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const nextChar = line[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === ',' && !inQuotes) {
+      values.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  values.push(current.trim());
+  return values.map(value => value.replace(/\r$/g, '').replace(/^"|"$/g, ''));
+};
+
 /**
  * Đọc file CSV và chuyển đổi thành mảng object
  */
 export const parseCSV = (csvContent: string): ShopeeProduct[] => {
-  const lines = csvContent.split('\n').filter(line => line.trim());
+  const normalizedContent = csvContent.replace(/^\uFEFF/, '');
+  const lines = normalizedContent.split(/\r?\n/).filter(line => line.trim());
   if (lines.length < 2) return [];
 
-  const headers = lines[0].split(',').map(h => h.trim());
   const products: ShopeeProduct[] = [];
 
   for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+    const values = splitCSVLine(lines[i]);
     
     if (values.length < 9) continue;
 
     products.push({
-      itemId: values[0],
-      itemName: values[1],
-      price: values[2],
-      sales: values[3],
-      shopName: values[4],
-      commissionRate: values[5],
-      commission: values[6],
-      productLink: values[7],
-      offerLink: values[8]
+      itemId: values[0] || '',
+      itemName: values[1] || '',
+      price: values[2] || '',
+      sales: values[3] || '',
+      shopName: values[4] || '',
+      commissionRate: values[5] || '',
+      commission: values[6] || '',
+      productLink: values[7] || '',
+      offerLink: values[8] || ''
     });
   }
 

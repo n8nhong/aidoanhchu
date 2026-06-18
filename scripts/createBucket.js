@@ -26,7 +26,7 @@ function loadSupabaseConfig() {
   }
 
   if (!url) {
-    url = 'https://encpsaatojnxgyjjcvnx.supabase.co';
+    url = 'https://wgtchjeondykhwljmneg.supabase.co';
   }
 
   return { url, key };
@@ -54,7 +54,7 @@ async function createBucket() {
     console.warn('   Ban dang de text gia (DIEN_ANON_KEY...) trong file .env');
     console.warn('   Can thay bang key THAT tu Supabase:');
     console.warn('');
-    console.warn('   1. Vao: https://supabase.com/dashboard/project/encpsaatojnxgyjjcvnx/settings/api');
+    console.warn('   1. Vao: https://supabase.com/dashboard/project/wgtchjeondykhwljmneg/settings/api');
     console.warn('   2. Copy key "anon" "public" (bat dau bang eyJ..., rat dai)');
     console.warn('   3. Dan vao file .env -> VITE_SUPABASE_ANON_KEY va SUPABASE_KEY');
     console.warn('   4. Chay lai deploy.bat');
