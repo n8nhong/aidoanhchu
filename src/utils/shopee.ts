@@ -81,12 +81,13 @@ export function filterHighCommissionProducts(items: any[]): any[] {
  */
 export function mapToProduct(item: any) {
   return {
-    id: `shopee_${item.item_id}`,
-    title: item.item_name || '',
-    price: Number(item.item_price) / 100000, // Shopee trả giá (đơn vị VND*100)
-    originalPrice: Number(item.item_price_before_discount) / 100000,
-    image: item.item_image?.[0] || '',
-    affiliateLink: `https://shopee.vn/product/${item.item_id}/${item.shopid}`,
+    id: `shopee_${item.item_id || item.itemid || item.itemId}`,
+    title: item.item_name || item.name || '',
+    price: Number(item.item_price || item.price) / 100000, // Shopee trả giá (đơn vị VND*100)
+    originalPrice: Number(item.item_price_before_discount || item.original_price || 0) / 100000,
+    image: (item.item_image?.[0]) || item.image || '',
+    // Correct affiliate/product link: /product/{shopId}/{itemId} or -i.{shopId}.{itemId}
+    affiliateLink: `https://shopee.vn/product/${item.shopid || item.shop_id || item.shopId}/${item.itemid || item.item_id || item.itemId}`,
     platform: 'shopee',
     isPublished: false,
     // Các trường tùy chỉnh khác nếu cần
