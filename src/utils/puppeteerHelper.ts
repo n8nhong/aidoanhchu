@@ -1,10 +1,9 @@
-import puppeteer from 'puppeteer';
+let puppeteer: any;
+if (typeof window === 'undefined') {
+  puppeteer = require('puppeteer');
+}
 import fs from 'fs';
 import os from 'os';
-
-if (typeof window !== 'undefined') {
-  throw new Error('puppeteerHelper should not be imported in browser context');
-}
 
 function findChromeExecutable(): string | null {
   const platform = os.platform();
