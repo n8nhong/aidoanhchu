@@ -1020,11 +1020,12 @@ export function AdminDashboard({
     try {
       setErrorMsg('');
       const supabase = (await import('@supabase/supabase-js')).createClient(url, key);
-      const { error } = await supabase.from('affiliate_products').delete().gt('id', '');
+      const { error } = await supabase.from('affiliate_products').delete().gte('postDate', '1900-01-01');
       
       if (error) {
         setErrorMsg(`❌ Lỗi xóa: ${error.message}`);
       } else {
+        setOnlineProducts([]);
         setSuccessMsg('✅ Đã xóa tất cả sản phẩm từ database thành công!');
         setTimeout(() => setSuccessMsg(''), 4000);
       }
@@ -3663,7 +3664,7 @@ export function AdminDashboard({
               <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
                 {products.map(item => {
                   const CatIcon = CATEGORY_ICONS[categories.find(c => c.id === item.categoryId)?.iconName || 'Shirt'] || Shirt;
-                  
+                   
                   return (
                     <motion.div 
                       key={item.id}
@@ -3780,6 +3781,92 @@ export function AdminDashboard({
                         )}
                       </div>
                     </motion.div>
+                  );
+                 })}
+                {/* Affiliate Products from Database */}
+                {(onlineProducts || []).map((item: any) => {
+                  const isConfirmDelete = confirmDeleteId === item.id;
+                  return (
+                   <motion.div 
+                     key={item.id}
+                     layoutId={`manage-row-${item.id}`}
+                     className="flex flex-col md:flex-row items-start md:items-center justify-between p-3 border border-blue-200 bg-blue-50/30 rounded transition-all gap-4 shadow-xs"
+                   >
+                     {/* Left: thumb and content info */}
+                     <div className="flex items-center gap-3 flex-1">
+                       {item.image ? (
+                         <img 
+                           src={item.image} 
+                           alt="" 
+                           className="w-12 h-12 rounded object-cover shadow-xs bg-gray-100 border border-gray-200 shrink-0" 
+                         />
+                       ) : (
+                         <div className="w-12 h-12 rounded object-cover shadow-xs bg-gray-100 border border-gray-200 shrink-0 flex items-center justify-center text-[8px] text-gray-400">
+                           No Img
+                         </div>
+                       )}
+                       <div className="min-w-0 flex-1">
+                         <h4 className="text-xs font-bold text-gray-800 line-clamp-1 leading-snug">{item.title}</h4>
+                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-[10px] text-gray-500">
+                           <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold text-[9px]">🤖 Auto-Publish</span>
+                           <span className="font-bold text-gray-700">{formatCurrency(item.price)}</span>
+                         </div>
+                       </div>
+                     </div>
+
+                     {/* Right: Actions */}
+                     <div className="flex items-center gap-2 w-full md:w-auto justify-end border-t md:border-t-0 pt-2 md:pt-0 shrink-0">
+                       <a 
+                         href={item.affiliateLink}
+                         target="_blank"
+                         rel="noreferrer"
+                         className="p-1.5 border border-blue-300 text-blue-600 hover:text-blue-800 bg-blue-50 rounded hover:bg-blue-100 cursor-pointer"
+                         title="Mua tại Shopee"
+                       >
+                         <ExternalLink className="w-3.5 h-3.5" />
+                       </a>
+
+                       {isConfirmDelete ? (
+                         <div className="flex items-center gap-1.5 bg-red-50 border border-red-200 rounded p-1">
+                           <span className="text-[10.5px] font-bold text-red-700 px-1">Xác nhận?</span>
+                           <button
+                             type="button"
+                             onClick={async () => {
+                               const url = localStorage.getItem('supabase_url') || '';
+                               const key = localStorage.getItem('supabase_key') || '';
+                               if (url && key) {
+                                 try {
+                                   const supabase = (await import('@supabase/supabase-js')).createClient(url, key);
+                                   await supabase.from('affiliate_products').delete().eq('id', item.id);
+                                   setOnlineProducts((onlineProducts || []).filter(p => p.id !== item.id));
+                                 } catch (e) { console.error(e); }
+                               }
+                               setConfirmDeleteId(null);
+                             }}
+                             className="bg-red-600 hover:bg-red-700 text-white text-[10px] px-2 py-1 rounded font-bold cursor-pointer"
+                           >
+                             Xóa
+                           </button>
+                           <button
+                             type="button"
+                             onClick={() => setConfirmDeleteId(null)}
+                             className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[10px] px-2 py-1 rounded font-bold cursor-pointer border border-gray-300"
+                           >
+                             Hủy
+                           </button>
+                         </div>
+                       ) : (
+                         <button 
+                           type="button"
+                           onClick={() => setConfirmDeleteId(item.id)}
+                           className="bg-red-50 hover:bg-red-100 border border-red-200 text-red-650 p-1.5 rounded transition-colors cursor-pointer"
+                           title="Xóa từ database"
+                         >
+                           <Trash2 className="w-3.5 h-3.5" />
+                         </button>
+                       )}
+                     </div>
+                   </motion.div>
                   );
                 })}
               </div>
