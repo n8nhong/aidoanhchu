@@ -337,8 +337,10 @@ export default function App() {
                       const localProduct = localProducts.find((p: any) => p.id === cloudProduct.id);
                       return localProduct ? { ...cloudProduct, ...localProduct } : cloudProduct;
                     });
-                    setProducts(mergedAff);
-                    localStorage.setItem('affili_products', JSON.stringify(mergedAff));
+                    const localOnlyProducts = localProducts.filter((p: any) => !normalizedAff.find((cp: any) => cp.id === p.id));
+                    const finalProducts = [...mergedAff, ...localOnlyProducts];
+                    setProducts(finalProducts);
+                    localStorage.setItem('affili_products', JSON.stringify(finalProducts));
                  }
              } else {
                console.log('⚠️ Affiliate products is empty or not an array');
@@ -1178,15 +1180,16 @@ Bạn muốn tìm hiểu thêm về khía cạnh nào? Hãy gõ câu hỏi hoặ
   };
 
   const handleDeleteProduct = (id: string) => {
-    setProducts(prevProducts => prevProducts.map(p => p.id === id ? { ...p, isDeleted: true } : p));
-    setItemResilient('affili_products', JSON.stringify(products.map(p => p.id === id ? { ...p, isDeleted: true } : p)));
+    const updatedProducts = products.map(p => p.id === id ? { ...p, isDeleted: true } : p);
+    setProducts(updatedProducts);
+    setItemResilient('affili_products', JSON.stringify(updatedProducts));
     deleteProductFromSupabase(id);
   };
 
   const handleUpdateProduct = (updatedProduct: Product) => {
-    setProducts(prevProducts => 
-      prevProducts.map(p => p.id === updatedProduct.id ? updatedProduct : p)
-    );
+    const newProducts = products.map(p => p.id === updatedProduct.id ? updatedProduct : p);
+    setProducts(newProducts);
+    setItemResilient('affili_products', JSON.stringify(newProducts));
   };
 
   const handleToggleSuggest = (id: string) => {

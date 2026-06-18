@@ -685,8 +685,25 @@ export function AdminDashboard({
           ? autoCategorize(product.itemName)
           : (categories.find(c => isIndustryCategoryId(c.id))?.id || '1');
 
-        // 3️⃣ GENERATE AI DESCRIPTION (Gemini free, tối đa 500 từ)
-        let aiDescription = product.itemName;
+        // 3️⃣ FETCH SHOPEE DETAILS FIRST (cào mô tả từ Shopee)
+        setCsvProcessing({
+          isProcessing: true,
+          currentIndex: i + 1,
+          total: csvProducts.length,
+          message: `📄 [${i + 1}/${csvProducts.length}] Cào mô tả sản phẩm từ Shopee...`
+        });
+
+        let shopeeDescription = '';
+        try {
+          const shopeeDetails = await fetchShopeeProductDetails(product.offerLink || product.productLink);
+          if (shopeeDetails && shopeeDetails.description) {
+            shopeeDescription = shopeeDetails.description.substring(0, 1000);
+          }
+        } catch (shopeeErr) {
+          console.warn('Lỗi cào Shopee:', shopeeErr);
+        }
+
+        // 4️⃣ GENERATE AI DESCRIPTION (Gemini free, tối đa 500 từ)
         let imagePrompt: string | undefined;
         
         if (csvConfig.autoDescription && geminiKeys && geminiKeys.length > 0) {
@@ -695,7 +712,7 @@ export function AdminDashboard({
               isProcessing: true,
               currentIndex: i + 1,
               total: csvProducts.length,
-              message: `✍️ [${i + 1}/${csvProducts.length}] Gemini viết mô tả...`
+              message: `✍️ [${i + 1}/${csvProducts.length}] Gemini viết lại mô tả...`
             });
 
             const validKeys = geminiKeys.filter((k: any) => k.key && k.key.trim()).map((k: any) => k.key.trim());
@@ -704,7 +721,7 @@ export function AdminDashboard({
               apiKeys: validKeys,
               productName: product.itemName,
               categoryId: industryCategoryId,
-              extraInfo: `Gian hàng: ${product.shopName}, Bán: ${product.sales}. Ngành hàng: ${INDUSTRY_CATEGORY_NAMES[industryCategoryId] || 'Thời Trang'}`,
+              extraInfo: `Mô tả từ Shopee: ${shopeeDescription || 'Không có'}. Gian hàng: ${product.shopName}, Bán: ${product.sales}. Ngành hàng: ${INDUSTRY_CATEGORY_NAMES[industryCategoryId] || 'Thời Trang'}`,
               price: parsePrice(product.price),
               onProgress: (msg: string) => {
                 setCsvProcessing({
@@ -716,15 +733,17 @@ export function AdminDashboard({
               }
             });
 
-            aiDescription = aiContent.description || aiDescription;
+            aiDescription = aiContent.description || (shopeeDescription || aiDescription);
             imagePrompt = aiContent.imageKeyword;
           } catch (aiErr) {
             console.warn('Lỗi AI:', aiErr);
-            aiDescription = `${product.itemName}\n\n📌 Thông tin chính:\n• Gian hàng: ${product.shopName}\n• Số lượt bán: ${product.sales}\n• Giá gốc: ${product.price}\n\n✨ Đây là sản phẩm được bán chạy trên sàn TMĐT với đánh giá tốt từ khách hàng. Sản phẩm thuộc danh mục ${INDUSTRY_CATEGORY_NAMES[industryCategoryId] || 'Thời Trang'}.\n\n💡 Lợi ích chính:\n• Chất lượng được kiểm chứng\n• Giao dịch an toàn qua sàn\n• Hỗ trợ khách hàng 24/7\n\n🎁 Hãy truy cập link bên dưới để xem chi tiết, đọc nhận xét khách hàng, và tìm hiểu thêm về sản phẩm này trước khi quyết định mua hàng.`;
+            aiDescription = shopeeDescription || `${product.itemName}\n\n📌 Thông tin chính:\n• Gian hàng: ${product.shopName}\n• Số lượt bán: ${product.sales}\n• Giá gốc: ${product.price}\n\n✨ Đây là sản phẩm được bán chạy trên sàn TMĐT với đánh giá tốt từ khách hàng. Sản phẩm thuộc danh mục ${INDUSTRY_CATEGORY_NAMES[industryCategoryId] || 'Thời Trang'}.\n\n💡 Lợi ích chính:\n• Chất lượng được kiểm chứng\n• Giao dịch an toàn qua sàn\n• Hỗ trợ khách hàng 24/7\n\n🎁 Hãy truy cập link bên dưới để xem chi tiết, đọc nhận xét khách hàng, và tìm hiểu thêm về sản phẩm này trước khi quyết định mua hàng.`;
           }
+        } else if (shopeeDescription) {
+          aiDescription = shopeeDescription;
         }
 
-        // 4️⃣ FETCH IMAGE + PROCESS WITH BACKGROUND
+        // 5️⃣ FETCH IMAGE + PROCESS WITH BACKGROUND
         let imageUrl = '';
         setCsvProcessing({
           isProcessing: true,
@@ -736,12 +755,6 @@ export function AdminDashboard({
         try {
           const shopeeDetails = await fetchShopeeProductDetails(product.offerLink || product.productLink);
           let shopeeImageUrl = shopeeDetails?.mainImage || shopeeDetails?.images?.[0] || '';
-
-          if (shopeeDetails && shopeeDetails.description) {
-            if (!aiDescription || aiDescription === product.itemName || aiDescription.length < 120) {
-              aiDescription = shopeeDetails.description;
-            }
-          }
 
           if (!imagePrompt) {
             imagePrompt = `${product.itemName}, high-resolution product photo, placed on a beautiful background, realistic, masterpiece, highly detailed`;
@@ -782,12 +795,12 @@ export function AdminDashboard({
           console.warn('Lỗi tải ảnh từ Shopee:', imgErr);
         }
 
-        // 5️⃣ CREATE PRODUCT
+        // 6️⃣ CREATE PRODUCT
         const basePrice = parsePrice(product.price);
         const markupPrice = Math.round(basePrice * (1 + csvConfig.autoPriceMarkup / 100));
 
         const newProduct: Product = {
-          id: 'p_' + Date.now() + '_' + i,
+          id: 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
           title: product.itemName,
           price: markupPrice,
           originalPrice: basePrice,
@@ -6049,13 +6062,10 @@ export function AdminDashboard({
                     
                     try {
                       const cleanUrl = url.endsWith('/') ? url.slice(0, -1) : url;
-                      const [bRes, pRes] = await Promise.all([
-                        fetch(`${cleanUrl}/rest/v1/buyers?select=id`, { headers: { apikey: key, Authorization: `Bearer ${key}` } }),
-                        fetch(`${cleanUrl}/rest/v1/online_products?select=id`, { headers: { apikey: key, Authorization: `Bearer ${key}` } })
-                      ]);
+                      const testRes = await fetch(`${cleanUrl}/rest/v1/buyers?select=id`, { headers: { apikey: key, Authorization: `Bearer ${key}` } });
                       
-                      const textB = await bRes.text();
-                      if (bRes.ok && pRes.ok) {
+                      const textB = await testRes.text();
+                      if (testRes.ok || textB.includes('pgjwt') || textB.includes('[')) {
                         try {
                           JSON.parse(textB); // verify it's JSON
                           localStorage.setItem('supabase_url', projectId);
