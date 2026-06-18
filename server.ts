@@ -175,7 +175,8 @@ app.get("/api/auto-publish/stream", async (req, res) => {
           "soldCount": prod.salesCount || 0,
           "isSuggested": true,
           "isDirectProduct": false,
-          "postDate": new Date().toISOString()
+          "postDate": new Date().toISOString(),
+          "isShowOnHome": true
         }, { onConflict: 'id' });
 
         if (dbError) {

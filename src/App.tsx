@@ -149,9 +149,11 @@ export default function App() {
         const response = await fetch('/api/affiliate-products');
         if (response.ok) {
           const data = await response.json();
-          if (data.products && data.products.length > 0) {
-            setOnlineProducts(data.products);
-            localStorage.setItem('affili_online_products', JSON.stringify(data.products));
+          // API returns array directly, not wrapped in {products: []}
+          const products = Array.isArray(data) ? data : (data.products || []);
+          if (products.length > 0) {
+            setOnlineProducts(products);
+            localStorage.setItem('affili_online_products', JSON.stringify(products));
           }
         }
       } catch (error) {
