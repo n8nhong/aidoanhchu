@@ -1007,6 +1007,32 @@ export function AdminDashboard({
     }
   };
 
+  const handleDeleteAllAffiliateProducts = async () => {
+    if (!window.confirm('⚠️ Bạn chắc chắn muốn XÓA TẤT CẢ sản phẩm đã đăng từ database? Hành động này không thể hoàn tác!')) return;
+    
+    const url = localStorage.getItem('supabase_url') || '';
+    const key = localStorage.getItem('supabase_key') || '';
+    if (!url || !key) {
+      setErrorMsg('Vui lòng cấu hình Supabase trước!');
+      return;
+    }
+
+    try {
+      setErrorMsg('');
+      const supabase = (await import('@supabase/supabase-js')).createClient(url, key);
+      const { error } = await supabase.from('affiliate_products').delete().neq('id', '');
+      
+      if (error) {
+        setErrorMsg(`❌ Lỗi xóa: ${error.message}`);
+      } else {
+        setSuccessMsg('✅ Đã xóa tất cả sản phẩm từ database thành công!');
+        setTimeout(() => setSuccessMsg(''), 4000);
+      }
+    } catch (err: any) {
+      setErrorMsg(`❌ Lỗi: ${err.message}`);
+    }
+  };
+
   const saveSocials = (channels: any) => {
     setSocials(channels);
     setItemResilient('affili_social_channels', JSON.stringify(channels));
@@ -3599,6 +3625,15 @@ export function AdminDashboard({
                 >
                   <Wand2 className="w-3.5 h-3.5" />
                   {enhanceProcessing.isProcessing ? 'Đang cải thiện...' : '✨ Cải thiện SP đã đăng'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteAllAffiliateProducts}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-bold bg-red-500 text-white hover:bg-red-600 shadow-sm"
+                  title="Xóa tất cả sản phẩm từ database"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  🗑️ Xóa tất cả
                 </button>
                 <div className="text-xs bg-gray-50 px-2 py-1 rounded border text-gray-500">
                   Đang đề xuất: <span className="font-bold text-shopee-orange">{products.filter(p => p.isSuggested).length}</span> bài
